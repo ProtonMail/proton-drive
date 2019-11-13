@@ -4,7 +4,7 @@
     "description": "Proton-drive",
     "main": "index.ts",
     "scripts": {
-        "start": "proton-pack dev-server",
+        "start": "proton-pack dev-server --appMode=standalone",
         "lint": "eslint src --ext .js,.ts,.tsx --cache",
         "pretty": "prettier --write  $(find src/app -type f -name '*.js' -o -name '*.ts' -o -name '*.tsx')",
         "preversion": "git update-index --no-assume-unchanged package-lock.json",
@@ -57,7 +57,7 @@
         "prettier": "^1.17.1",
         "proton-bundler": "github:ProtonMail/proton-bundler#semver:^1.7.7",
         "proton-i18n": "github:ProtonMail/proton-i18n#semver:^1.6.12",
-        "typescript": "^3.6.4"
+        "typescript": "^3.7.2"
     },
     "lint-staged": {
         "(*.js|*.ts|*.tsx)": [
