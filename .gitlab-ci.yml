@@ -62,7 +62,7 @@ lint:
     script:
         - npm run lint
 
-types:
+lint-types:
     stage: test
     tags:
         - experimental
