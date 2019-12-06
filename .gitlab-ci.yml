@@ -17,6 +17,8 @@ default:
         - git config --global user.email $GIT_CI_EMAIL
         - git config --global user.name $GIT_CI_USERNAME
         - git config --global url."https://".insteadOf git://
+        ## Because gitlab... https://stackoverflow.com/questions/51716044/how-do-i-push-to-a-repo-from-within-a-gitlab-ci-pipeline
+        - export APP_GIT=`echo $CI_REPOSITORY_URL | perl -pe 's#.*@(.+?(\:\d+)?)/#git@\1:#'`
         - mkdir ~/.ssh 2> /dev/null
         - |
           cat <<EOF > ~/.ssh/config
@@ -40,6 +42,8 @@ default:
 
 setup:
     stage: setup
+    tags:
+        - experimental
     script:
         - ./ci-scripts/prepare-ci.sh install-app --remote "$APP_GIT"
     artifacts:
@@ -57,7 +61,26 @@ lint:
         - experimental
     script:
         - npm run lint
+
+types:
+    stage: test
+    tags:
+        - experimental
+    script:
+        - npm run check-types
+
+lint-translations:
+    stage: test
+    tags:
+        - experimental
+    script:
         - npm run i18n:validate
+
+lint-translations-context:
+    stage: test
+    tags:
+        - experimental
+    script:
         - npm run i18n:validate:context
 
 i18n-upgrade-app:
@@ -79,8 +102,7 @@ deploy:
     tags:
         - experimental
     script:
-        - ./ci-scripts/prepare-ci.sh install-app-remote
-        - ./ci-scripts/prepare-ci.sh deploy-app --branch "$BRANCH_DEPLOY" --api "$API_DEPLOY"
+        - ./ci-scripts/prepare-ci.sh deploy-app --branch "$BRANCH_DEPLOY" --api "$API_DEPLOY" --remote "$APP_GIT"
     when: manual
 
 deploy-qa:
@@ -88,8 +110,8 @@ deploy-qa:
     tags:
         - experimental
     script:
-        - ./ci-scripts/prepare-ci.sh install-app-remote --update-lock
-        - ./ci-scripts/prepare-ci.sh deploy-app --branch "$BRANCH_DEPLOY_QA" --api "$API_DEPLOY"
+        - ./ci-scripts/prepare-ci.sh reinstall-vendor --update-lock
+        - ./ci-scripts/prepare-ci.sh deploy-app --branch "$BRANCH_DEPLOY_QA" --api "$API_DEPLOY" --remote "$APP_GIT" --update-lock
     when: manual
 
 clean-pipeline:
@@ -101,5 +123,4 @@ clean-pipeline:
     dependencies: []
 
 variables:
-    APP_GIT: git@github.com:ProtonMail/proton-drive.git
     NODE_OPTIONS: --max-old-space-size=4096
