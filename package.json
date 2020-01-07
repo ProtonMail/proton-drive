@@ -19,7 +19,8 @@
         "build:standalone": "cross-env NODE_ENV=production proton-pack compile --appMode=standalone",
         "bundle": "cross-env NODE_ENV=production proton-pack config",
         "postbundle": "cross-env NODE_ENV_DIST=bundle-only proton-bundler",
-        "check-types": "tsc"
+        "check-types": "tsc",
+        "test": "echo 123"
     },
     "repository": {
         "type": "git",
