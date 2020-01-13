@@ -36,6 +36,7 @@
         "publicPathFlag": "--publicPath=/drive/"
     },
     "dependencies": {
+        "@mattiasbuelens/web-streams-adapter": "0.1.0-alpha.3",
         "abortcontroller-polyfill": "^1.3.0",
         "design-system": "github:ProtonMail/design-system.git#master",
         "proton-pack": "github:ProtonMail/proton-pack.git#semver:^3.0.0",
