@@ -13,11 +13,11 @@
         "i18n:validate:context": "proton-i18n extract && proton-i18n validate",
         "i18n:getlatest": "proton-i18n upgrade",
         "i18n:upgrade": "proton-i18n extract --verbose && proton-i18n crowdin -u --verbose",
-        "deploy": "proton-bundler",
-        "deploy:standalone": "proton-bundler --appMode standalone",
+        "deploy": "proton-bundler --git",
+        "deploy:standalone": "proton-bundler --git --appMode standalone",
         "build": "cross-env NODE_ENV=production proton-pack compile $npm_package_config_publicPathFlag",
         "build:standalone": "cross-env NODE_ENV=production proton-pack compile --appMode=standalone",
-        "bundle": "cross-env NODE_ENV=production proton-pack config",
+        "bundle": "proton-bundler",
         "postbundle": "cross-env NODE_ENV_DIST=bundle-only proton-bundler",
         "check-types": "tsc",
         "test": "echo 123"
@@ -64,7 +64,7 @@
         "husky": "^2.3.0",
         "lint-staged": "^8.1.7",
         "prettier": "^1.17.1",
-        "proton-bundler": "github:ProtonMail/proton-bundler#semver:^1.7.7",
+        "proton-bundler": "github:ProtonMail/proton-bundler#semver:^2.0.0",
         "proton-i18n": "github:ProtonMail/proton-i18n#semver:^1.6.12",
         "service-worker-loader": "^3.3.1",
         "typescript": "^3.7.2"
