@@ -1,93 +1,228 @@
-import React, { useEffect, useState } from 'react';
-import { ToolbarSeparator, Toolbar, ToolbarButton, useModals } from 'react-components';
-import { c } from 'ttag';
-import { DriveResource } from './DriveResourceProvider';
-import useShare from '../../hooks/useShare';
-import { ResourceType } from '../../interfaces/link';
-import useFiles from '../../hooks/useFiles';
-import FileSaver from '../../utils/FileSaver/FileSaver';
+import React, { useEffect } from 'react';
+import { c, msgid } from 'ttag';
+
+import { ToolbarSeparator, Toolbar, ToolbarButton, useModals, useNotifications, useLoading } from 'react-components';
+
 import { getMetaForTransfer } from './Drive';
 import { useDriveContent } from './DriveContentProvider';
+import useFiles from '../../hooks/useFiles';
+import useTrash from '../../hooks/useTrash';
+import useDrive from '../../hooks/useDrive';
+import { useDriveCache } from '../DriveCache/DriveCacheProvider';
 import CreateFolderModal from '../CreateFolderModal';
 import RenameModal from '../RenameModal';
+import DetailsModal from '../DetailsModal';
+import FileSaver from '../../utils/FileSaver/FileSaver';
+import { getNotificationTextForItemList } from './helpers';
+import { DriveFolder } from './DriveFolderProvider';
+import { LinkType } from '../../interfaces/link';
+import { isPreviewAvailable } from '../FilePreview/FilePreview';
 
 interface Props {
-    resource: DriveResource;
-    openResource: (resource: DriveResource) => void;
-    parentLinkID?: string;
+    activeFolder: DriveFolder;
+    openLink: (shareId: string, linkId: string, type: LinkType) => void;
 }
 
-const DriveToolbar = ({ resource, openResource, parentLinkID }: Props) => {
+const DriveToolbar = ({ activeFolder, openLink }: Props) => {
     const { createModal } = useModals();
-    const { fileBrowserControls, addToLoadQueue } = useDriveContent();
-    const { getFolderMeta } = useShare(resource.shareId);
-    const { startFileTransfer } = useFiles(resource.shareId);
-    const [parentID, setParentID] = useState(parentLinkID);
+    const { createNotification } = useNotifications();
+    const { fileBrowserControls } = useDriveContent();
+    const { getLinkMeta, createNewFolder, renameLink, events } = useDrive();
+    const { startFileTransfer } = useFiles();
+    const { trashLinks, restoreLinks } = useTrash();
+    const [moveToTrashLoading, withMoveToTrashLoading] = useLoading();
+    const cache = useDriveCache();
 
+    const { linkId, shareId } = activeFolder;
+
+    const ParentLinkID = cache.get.linkMeta(shareId, linkId)?.ParentLinkID;
     const { selectedItems } = fileBrowserControls;
 
     useEffect(() => {
-        let isCanceled = false;
-
-        if (!parentLinkID) {
-            getFolderMeta(resource.linkId).then(({ Folder }) => !isCanceled && setParentID(Folder.ParentLinkID));
-        } else if (parentID !== parentLinkID) {
-            setParentID(parentLinkID);
+        if (!ParentLinkID) {
+            getLinkMeta(shareId, linkId);
         }
-
-        return () => {
-            isCanceled = true;
-        };
-    }, [parentLinkID, resource.linkId]);
-
-    const onlyFilesSelected = selectedItems.every((item) => item.Type === ResourceType.FILE);
+    }, [shareId, linkId, ParentLinkID]);
 
     const handleBackClick = () => {
-        if (parentID) {
-            openResource({ shareId: resource.shareId, linkId: parentID, type: ResourceType.FOLDER });
+        if (ParentLinkID) {
+            openLink(shareId, ParentLinkID, LinkType.FOLDER);
         }
+    };
+
+    const handlePreview = () => {
+        const item = selectedItems[0];
+        const { shareId } = activeFolder;
+
+        openLink(shareId, item.LinkID, item.Type);
     };
 
     const handleDownloadClick = () => {
         selectedItems.forEach(async (item) => {
             const meta = getMetaForTransfer(item);
-            const fileStream = await startFileTransfer(item.LinkID, meta);
+            const fileStream = await startFileTransfer(shareId, item.LinkID, meta);
             FileSaver.saveViaDownload(fileStream, meta);
         });
     };
 
-    const handleCreateFolder = () => {
-        // Reloads all folder contents after folder creation
-        createModal(<CreateFolderModal onDone={() => addToLoadQueue(resource)} resource={resource} />);
+    const handleCreateFolder = async () => {
+        createModal(
+            <CreateFolderModal
+                createNewFolder={async (name) => {
+                    await createNewFolder(shareId, linkId, name);
+                    events.call(shareId);
+                }}
+            />
+        );
     };
 
     const handleRename = () => {
+        const item = selectedItems[0];
         createModal(
-            <RenameModal onDone={() => addToLoadQueue(resource)} item={selectedItems[0]} shareId={resource.shareId} />
+            <RenameModal
+                item={item}
+                renameLink={async (name) => {
+                    await renameLink(shareId, item.LinkID, item.ParentLinkID, name, item.Type);
+                    events.call(shareId);
+                }}
+            />
+        );
+    };
+
+    const handleDetailsClick = () => {
+        createModal(<DetailsModal item={selectedItems[0]} activeFolder={activeFolder} getLinkMeta={getLinkMeta} />);
+    };
+
+    const moveToTrash = async () => {
+        const toTrash = selectedItems;
+        await trashLinks(
+            shareId,
+            linkId,
+            toTrash.map(({ LinkID }) => LinkID)
+        );
+
+        const trashedLinksCount = toTrash.length;
+        const [{ Name: firstItemName }] = toTrash;
+
+        const undoAction = async () => {
+            await restoreLinks(
+                shareId,
+                toTrash.map(({ LinkID }) => LinkID)
+            );
+
+            const notificationMessages = {
+                allFiles: c('Notification').ngettext(
+                    msgid`"${firstItemName}" restored from Trash`,
+                    `${trashedLinksCount} files restored from Trash`,
+                    trashedLinksCount
+                ),
+                allFolders: c('Notification').ngettext(
+                    msgid`"${firstItemName}" restored from Trash`,
+                    `${trashedLinksCount} folders restored from Trash`,
+                    trashedLinksCount
+                ),
+                mixed: c('Notification').ngettext(
+                    msgid`"${firstItemName}" restored from Trash`,
+                    `${trashedLinksCount} items restored from Trash`,
+                    trashedLinksCount
+                )
+            };
+
+            const notificationText = getNotificationTextForItemList(toTrash, notificationMessages);
+            createNotification({ text: notificationText });
+            await events.call(shareId);
+        };
+
+        const notificationMessages = {
+            allFiles: c('Notification').ngettext(
+                msgid`"${firstItemName}" moved to Trash`,
+                `${trashedLinksCount} files moved to Trash`,
+                trashedLinksCount
+            ),
+            allFolders: c('Notification').ngettext(
+                msgid`"${firstItemName}" moved to Trash`,
+                `${trashedLinksCount} folders moved to Trash`,
+                trashedLinksCount
+            ),
+            mixed: c('Notification').ngettext(
+                msgid`"${firstItemName}" moved to Trash`,
+                `${trashedLinksCount} items moved to Trash`,
+                trashedLinksCount
+            )
+        };
+
+        const movedToTrashText = getNotificationTextForItemList(toTrash, notificationMessages, undoAction);
+        createNotification({
+            type: 'success',
+            text: movedToTrashText
+        });
+        await events.call(shareId);
+    };
+
+    const renderSelectionActions = () => {
+        if (!selectedItems.length) {
+            return <ToolbarButton icon="folder-new" title={c('Action').t`New Folder`} onClick={handleCreateFolder} />;
+        }
+
+        const isMultiSelect = selectedItems.length > 1;
+        const hasFoldersSelected = selectedItems.some((item) => item.Type === LinkType.FOLDER);
+        const isPreviewDisabled =
+            isMultiSelect ||
+            hasFoldersSelected ||
+            !selectedItems[0].MimeType ||
+            !isPreviewAvailable(selectedItems[0].MimeType);
+
+        return (
+            <>
+                <ToolbarButton
+                    disabled={isPreviewDisabled}
+                    title={c('Action').t`Preview`}
+                    icon="read"
+                    onClick={handlePreview}
+                />
+                <ToolbarButton
+                    disabled={hasFoldersSelected}
+                    title={c('Action').t`Download`}
+                    icon="download"
+                    onClick={handleDownloadClick}
+                />
+                <ToolbarButton
+                    disabled={isMultiSelect}
+                    title={c('Action').t`Rename`}
+                    icon="file-edit"
+                    onClick={handleRename}
+                />
+                <ToolbarButton
+                    disabled={isMultiSelect}
+                    title={c('Action').t`Details`}
+                    icon="info"
+                    onClick={handleDetailsClick}
+                />
+
+                <ToolbarSeparator />
+
+                <ToolbarButton
+                    disabled={moveToTrashLoading}
+                    title={c('Action').t`Move to Trash`}
+                    icon="trash"
+                    onClick={() => withMoveToTrashLoading(moveToTrash())}
+                />
+            </>
         );
     };
 
     return (
         <Toolbar>
-            {
-                <>
-                    <ToolbarButton
-                        disabled={!parentID}
-                        title={c('Action').t`Back`}
-                        onClick={handleBackClick}
-                        icon="arrow-left"
-                    />
-                    <ToolbarSeparator />
-                </>
-            }
+            <ToolbarButton
+                disabled={!ParentLinkID}
+                title={c('Action').t`Back`}
+                onClick={handleBackClick}
+                icon="arrow-left"
+            />
 
-            <ToolbarButton icon="folder-new" title={c('Action').t`New Folder`} onClick={handleCreateFolder} />
-            {selectedItems.length === 1 && (
-                <ToolbarButton title={c('Action').t`Rename`} icon="file-edit" onClick={handleRename} />
-            )}
-            {onlyFilesSelected && selectedItems.length > 0 && (
-                <ToolbarButton title={c('Action').t`Download`} icon="download" onClick={handleDownloadClick} />
-            )}
+            <ToolbarSeparator />
+
+            {renderSelectionActions()}
         </Toolbar>
     );
 };

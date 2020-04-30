@@ -11,14 +11,14 @@ const getSidebar = () => {
             text: c('Link').t`My files`,
             link: '/drive',
             icon: 'inbox'
+        },
+        {
+            text: c('Link').t`Trash`,
+            link: '/trash',
+            icon: 'trash'
         }
     ];
 };
-
-const getMobileLinks = () => [
-    { to: '/inbox', icon: 'protonmail', external: true, current: false },
-    { to: '/contacts', icon: 'protoncontacts', external: false, current: true }
-];
 
 interface Props {
     children: React.ReactNode;
@@ -49,12 +49,13 @@ const PrivateLayout = ({ children }: Props) => {
                         expanded={isHeaderExpanded}
                         onToggleExpand={toggleHeaderExpanded}
                         list={getSidebar()}
-                        mobileLinks={getMobileLinks()}
                     >
                         <UploadButton />
                     </Sidebar>
-                    <main className="main flex-item-fluid">{children}</main>
-                    <TransfersInfo />
+                    <main className="main flex-item-fluid">
+                        {children}
+                        <TransfersInfo />
+                    </main>
                 </div>
             </div>
         </div>

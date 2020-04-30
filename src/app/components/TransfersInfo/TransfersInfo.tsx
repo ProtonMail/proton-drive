@@ -111,7 +111,7 @@ function TransfersInfo() {
         .map(({ component }) => component);
 
     return (
-        <div className="pd-transfers">
+        <div className={classnames(['pd-transfers', minimized && 'pd-transfers--minimized'])}>
             <Heading
                 downloads={downloads}
                 uploads={uploads}
@@ -119,9 +119,7 @@ function TransfersInfo() {
                 onToggleMinimize={toggleMinimized}
                 onClose={handleCloseClick}
             />
-            <div className={classnames(['pd-transfers-list', minimized && 'pd-transfers-list--minimized'])}>
-                {transfers}
-            </div>
+            <div className="pd-transfers-list">{transfers}</div>
         </div>
     );
 }

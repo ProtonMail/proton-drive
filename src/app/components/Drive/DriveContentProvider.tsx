@@ -1,18 +1,13 @@
-import React, { useState, createContext, useEffect, useContext, useRef } from 'react';
-import { ResourceType, LinkShortMeta } from '../../interfaces/link';
+import React, { useState, createContext, useEffect, useContext, useRef, useCallback } from 'react';
+import { LinkMeta } from '../../interfaces/link';
 import { FileBrowserItem } from '../FileBrowser/FileBrowser';
-import useShare from '../../hooks/useShare';
-import { DriveResource, useDriveResource } from './DriveResourceProvider';
 import useFileBrowser from '../FileBrowser/useFileBrowser';
-import { FOLDER_PAGE_SIZE } from '../../constants';
-import { useUploadProvider } from '../uploads/UploadProvider';
-import { TransferState } from '../../interfaces/transfer';
+import useDrive from '../../hooks/useDrive';
+import { useDriveCache } from '../DriveCache/DriveCacheProvider';
+import { useDriveActiveFolder, DriveFolder } from './DriveFolderProvider';
 
-const isSameResource = (a: DriveResource, b: DriveResource) =>
-    a.type === b.type && a.shareId === b.shareId && a.linkId === b.linkId;
-
-export const mapLinksToChildren = (decryptedLinks: LinkShortMeta[]): FileBrowserItem[] =>
-    decryptedLinks.map(({ LinkID, Type, Name, Modified, Size, MimeType, ParentLinkID }) => ({
+export const mapLinksToChildren = (decryptedLinks: LinkMeta[]): FileBrowserItem[] => {
+    return decryptedLinks.map(({ LinkID, Type, Name, Modified, Size, MimeType, ParentLinkID }) => ({
         Name,
         LinkID,
         Type,
@@ -21,107 +16,101 @@ export const mapLinksToChildren = (decryptedLinks: LinkShortMeta[]): FileBrowser
         MimeType,
         ParentLinkID
     }));
-
+};
 interface DriveContentProviderState {
-    contents: { done: boolean; items: FileBrowserItem[] };
-    addToLoadQueue: (resource: DriveResource, page?: number) => void;
+    contents: FileBrowserItem[];
+    loadNextPage: () => void;
     fileBrowserControls: ReturnType<typeof useFileBrowser>;
     loading: boolean;
+    initialized: boolean;
+    complete?: boolean;
 }
 
 const DriveContentContext = createContext<DriveContentProviderState | null>(null);
 
-const DriveContentProviderInner = ({ children, resource }: { children: React.ReactNode; resource: DriveResource }) => {
-    const { uploads } = useUploadProvider();
-    const { getFolderContents } = useShare(resource.shareId);
+const DriveContentProviderInner = ({
+    children,
+    activeFolder: { linkId, shareId }
+}: {
+    children: React.ReactNode;
+    activeFolder: DriveFolder;
+}) => {
+    const cache = useDriveCache();
+    const { fetchNextFolderContents } = useDrive();
+    const [initialized, setInitialized] = useState(false);
     const [loading, setLoading] = useState(false);
-    const [loadQueue, setLoadQueue] = useState<{ page: number }[]>([]);
-    const [contents, setContents] = useState<{ done: boolean; items: FileBrowserItem[][] }>({
-        items: [],
-        done: false
-    });
-    const fileBrowserControls = useFileBrowser(contents.items.flat());
-    const { clearSelections } = fileBrowserControls;
+    const [, setError] = useState();
+
+    const contents = mapLinksToChildren(cache.get.childLinkMetas(shareId, linkId) || []);
+    const complete = cache.get.childrenComplete(shareId, linkId);
+    const fileBrowserControls = useFileBrowser(contents);
     const abortSignal = useRef<AbortSignal>();
+    const contentLoading = useRef(false);
 
-    const uploadedCount = uploads.filter(
-        ({ state, info }) =>
-            state === TransferState.Done && info.ParentLinkID === resource.linkId && info.ShareID === resource.shareId
-    ).length;
-
-    const loadNextInQueue = async (): Promise<void> => {
-        const signal = abortSignal.current;
-        const [next, ...remainingQueue] = loadQueue;
-
-        if (!next) {
-            setLoading(false);
+    const loadNextPage = useCallback(async (): Promise<void> => {
+        if (contentLoading.current || complete) {
             return;
         }
 
+        contentLoading.current = true;
         setLoading(true);
-        setLoadQueue(remainingQueue);
-        const decryptedLinks = await getFolderContents(resource.linkId, next.page, FOLDER_PAGE_SIZE);
 
-        if (!signal?.aborted) {
-            const links = mapLinksToChildren(decryptedLinks);
+        const signal = abortSignal.current;
 
-            // refreshes the page and discards all next pages (may be outdated)
-            setContents((prev) => ({
-                done: decryptedLinks.length !== FOLDER_PAGE_SIZE,
-                items: [...prev.items.slice(0, next.page), links]
-            }));
-            setLoading(false);
+        try {
+            await fetchNextFolderContents(shareId, linkId);
+            if (!signal?.aborted) {
+                contentLoading.current = false;
+                setLoading(false);
+                setInitialized(true);
+            }
+        } catch (e) {
+            const children = cache.get.childLinks(shareId, linkId);
+
+            if (signal?.aborted) {
+                return;
+            }
+
+            contentLoading.current = false;
+            if (!children?.length) {
+                setError(() => {
+                    throw e;
+                });
+            } else if (!signal?.aborted) {
+                setLoading(false);
+            }
         }
-    };
-
-    const addToLoadQueue = (forResource: DriveResource, page = 0) => {
-        const alreadyInQueue = loadQueue.find((item) => item.page === page);
-
-        if (isSameResource(forResource, resource) && !alreadyInQueue) {
-            setLoadQueue((queue) => [...queue, { page }]);
-        }
-    };
-
-    useEffect(() => {
-        if (!loading && loadQueue.length) {
-            loadNextInQueue();
-        }
-    }, [loading, loadQueue]);
+    }, [shareId, linkId]);
 
     useEffect(() => {
         const abortController = new AbortController();
 
-        if (resource.type === ResourceType.FOLDER) {
-            if (contents) {
-                setContents({ done: false, items: [] });
-            }
-            setLoadQueue([]);
+        abortSignal.current = abortController.signal;
+        fileBrowserControls.clearSelections();
+
+        if (loading) {
             setLoading(false);
-            clearSelections();
-            abortSignal.current = abortController.signal;
         }
+
+        if (!initialized || !cache.get.listedChildLinks(shareId, linkId)?.length) {
+            loadNextPage();
+        }
+
         return () => {
+            contentLoading.current = false;
             abortController.abort();
         };
-    }, [resource.shareId, resource.type, resource.linkId]);
-
-    useEffect(() => {
-        // Reload all folder contents after upload
-        if (uploadedCount) {
-            addToLoadQueue(resource);
-        }
-    }, [uploadedCount]);
+    }, [loadNextPage]);
 
     return (
         <DriveContentContext.Provider
             value={{
                 loading,
                 fileBrowserControls,
-                addToLoadQueue,
-                contents: {
-                    done: contents.done,
-                    items: contents.items.flat()
-                }
+                loadNextPage,
+                contents,
+                complete,
+                initialized
             }}
         >
             {children}
@@ -135,10 +124,10 @@ const DriveContentProviderInner = ({ children, resource }: { children: React.Rea
  * Exposes functions to (re)load open folder contents.
  */
 const DriveContentProvider = ({ children }: { children: React.ReactNode }) => {
-    const { resource } = useDriveResource();
+    const { folder } = useDriveActiveFolder();
 
-    return resource ? (
-        <DriveContentProviderInner resource={resource}>{children}</DriveContentProviderInner>
+    return folder ? (
+        <DriveContentProviderInner activeFolder={folder}>{children}</DriveContentProviderInner>
     ) : (
         <>{children}</>
     );

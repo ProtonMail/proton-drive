@@ -1,126 +1,76 @@
 import React, { useEffect, useState } from 'react';
 import { RouteComponentProps } from 'react-router';
 import { c } from 'ttag';
+import { Toolbar } from 'react-components';
 import Drive from '../components/Drive/Drive';
-import useDrive from '../hooks/useDrive';
 import Page, { PageMainArea } from '../components/Page';
 import StickyHeader from '../components/StickyHeader';
-import { DriveResource, useDriveResource } from '../components/Drive/DriveResourceProvider';
+import { useDriveActiveFolder } from '../components/Drive/DriveFolderProvider';
 import DriveContentProvider from '../components/Drive/DriveContentProvider';
 import DriveToolbar from '../components/Drive/DriveToolbar';
-import { FileBrowserItem } from '../components/FileBrowser/FileBrowser';
-import { LinkMeta, ResourceType } from '../interfaces/link';
-import { ResourceURLType } from '../constants';
+import { LinkType } from '../interfaces/link';
+import { LinkURLType } from '../constants';
 import DriveBreadcrumbs from '../components/DriveBreadcrumbs';
+import { useDriveCache } from '../components/DriveCache/DriveCacheProvider';
 
-const toResourceType = (type: ResourceURLType) => {
-    const resourceType = {
-        [ResourceURLType.FILE]: ResourceType.FILE,
-        [ResourceURLType.FOLDER]: ResourceType.FOLDER
-    }[type];
-
-    if (!resourceType) {
-        throw new Error(`Type ${type} is unexpected, must be file or folder`);
-    }
-
-    return resourceType;
-};
-
-const toLinkType = (type: ResourceType) => {
+const toLinkURLType = (type: LinkType) => {
     const linkType = {
-        [ResourceType.FILE]: ResourceURLType.FILE,
-        [ResourceType.FOLDER]: ResourceURLType.FOLDER
+        [LinkType.FILE]: LinkURLType.FILE,
+        [LinkType.FOLDER]: LinkURLType.FOLDER
     }[type];
 
     if (!linkType) {
-        throw new Error(`Type ${type} is unexpected, must be integer representing resource type`);
+        throw new Error(`Type ${type} is unexpected, must be integer representing link type`);
     }
 
     return linkType;
 };
 
-const toResource = (shareId?: string, type?: ResourceURLType, linkId?: string): DriveResource | undefined => {
-    if (shareId && type && linkId) {
-        return { shareId, type: toResourceType(type), linkId };
-    } else if (!shareId && !type && !linkId) {
-        return undefined;
-    }
-    throw Error('Missing parameters, should be none or shareId/type/linkId');
-};
-
-interface DriveHistoryState {
-    preloadedLink?: FileBrowserItem | LinkMeta;
-}
-
 function DriveContainer({
     match,
-    history,
-    location
-}: RouteComponentProps<
-    { shareId?: string; type?: ResourceURLType; linkId?: string },
-    {},
-    DriveHistoryState | undefined
->) {
-    const { loadDrive } = useDrive();
-    const { resource, setResource } = useDriveResource();
+    history
+}: RouteComponentProps<{ shareId?: string; type?: LinkURLType; linkId?: string }>) {
+    const cache = useDriveCache();
+    const { folder, setFolder } = useDriveActiveFolder();
     const [, setError] = useState();
 
-    const navigateToResource = (resource: DriveResource, item?: FileBrowserItem) => {
-        history.push(`/drive/${resource.shareId}/${toLinkType(resource.type)}/${resource.linkId}`, {
-            preloadedLink: item
-        });
+    const navigateToLink = (shareId: string, linkId: string, type: LinkType) => {
+        history.push(`/drive/${shareId}/${toLinkURLType(type)}/${linkId}`);
     };
 
     useEffect(() => {
         const { shareId, type, linkId } = match.params;
 
-        const initDrive = async () => {
-            const initialResource = toResource(shareId, type, linkId);
+        if (!shareId && !type && !linkId) {
+            const meta = cache.get.defaultShareMeta();
 
-            if (type === ResourceURLType.FOLDER && initialResource) {
-                setResource(initialResource);
-            } else if (!initialResource) {
-                const initResult = await loadDrive();
-
-                if (!initResult) {
+            if (meta) {
+                setFolder({ shareId: meta.ShareID, linkId: meta.LinkID });
+            } else {
+                setError(() => {
                     throw new Error('Drive is not initilized, cache has been cleared unexpectedly');
-                }
-
-                const { Share } = initResult;
-                setResource({ shareId: Share.ShareID, linkId: Share.LinkID, type: ResourceType.FOLDER });
+                });
             }
-        };
-
-        initDrive().catch((error) =>
+        } else if (!shareId || !type || !linkId) {
             setError(() => {
-                throw error;
-            })
-        );
+                throw new Error('Missing parameters, should be none or shareId/type/linkId');
+            });
+        } else if (type === LinkURLType.FOLDER) {
+            setFolder({ shareId, linkId });
+        }
     }, [match.params]);
 
+    // TODO: change toolbar props to optional children in react-components
     return (
         <Page title={c('Title').t`My files`}>
             <DriveContentProvider>
-                {resource && (
-                    <DriveToolbar
-                        resource={resource}
-                        openResource={navigateToResource}
-                        parentLinkID={location.state?.preloadedLink?.ParentLinkID}
-                    />
-                )}
-
+                {folder ? <DriveToolbar activeFolder={folder} openLink={navigateToLink} /> : <Toolbar>{null}</Toolbar>}
                 <PageMainArea hasToolbar className="flex flex-column">
                     <StickyHeader>
-                        {resource && (
-                            <DriveBreadcrumbs
-                                openResource={navigateToResource}
-                                preloaded={location.state?.preloadedLink}
-                                resource={resource}
-                            />
-                        )}
+                        {folder && <DriveBreadcrumbs activeFolder={folder} openLink={navigateToLink} />}
                     </StickyHeader>
 
-                    {resource && <Drive resource={resource} openResource={navigateToResource} />}
+                    {folder && <Drive activeFolder={folder} openLink={navigateToLink} />}
                 </PageMainArea>
             </DriveContentProvider>
         </Page>

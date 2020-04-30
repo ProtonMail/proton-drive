@@ -5,9 +5,9 @@ import ChunkFileReader from './ChunkFileReader';
 import { UploadLink } from '../../interfaces/file';
 import { TransferCancel } from '../../interfaces/transfer';
 import runInQueue from '../../utils/runInQueue';
+import { FILE_CHUNK_SIZE } from '../../constants';
 
 // Max decrypted block size
-const CHUNK_SIZE = 4 * 1024 * 1024;
 const MAX_CHUNKS_READ = 10;
 const MAX_THREADS_PER_UPLOAD = 3;
 
@@ -16,14 +16,11 @@ type BlockList = {
     Size: number;
     Index: number;
 }[];
-type RequestUpload = (blockList: BlockList) => Promise<UploadLink[]>;
-type BlockTransformer = (buffer: Uint8Array) => Promise<Uint8Array>;
-type UploadFinalizer = (blocklist: BlockMeta[]) => Promise<void>;
 
 export interface UploadCallbacks {
-    transform: BlockTransformer;
-    requestUpload: RequestUpload;
-    finalize: UploadFinalizer;
+    transform: (buffer: Uint8Array) => Promise<Uint8Array>;
+    requestUpload: (blockList: BlockList) => Promise<UploadLink[]>;
+    finalize: (blocklist: BlockMeta[]) => Promise<void>;
     onProgress?: (bytes: number) => void;
 }
 
@@ -58,7 +55,7 @@ export async function upload(
         xhr.onload = () => resolve();
         xhr.upload.onerror = reject;
         xhr.onerror = reject;
-        xhr.open('put', url);
+        xhr.open('post', url);
         xhr.setRequestHeader('Content-Type', 'application/x-binary');
         xhr.send(new Blob([content]));
     });
@@ -95,7 +92,10 @@ export function initUpload({ requestUpload, transform, onProgress, finalize }: U
             )
         );
 
-        await runInQueue(blockUploaders, MAX_THREADS_PER_UPLOAD);
+        await runInQueue(blockUploaders, MAX_THREADS_PER_UPLOAD).catch((e) => {
+            abortController.abort();
+            throw e;
+        });
 
         return UploadLinks.map(({ Token }, i) => ({
             Index: BlockList[i].Index,
@@ -109,7 +109,7 @@ export function initUpload({ requestUpload, transform, onProgress, finalize }: U
             return;
         }
 
-        const reader = new ChunkFileReader(blob, CHUNK_SIZE);
+        const reader = new ChunkFileReader(blob, FILE_CHUNK_SIZE);
         const blockTokens: BlockMeta[] = [];
         let startIndex = 1;
 

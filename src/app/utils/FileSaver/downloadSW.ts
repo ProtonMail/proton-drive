@@ -1,4 +1,3 @@
-import { getRandomString } from 'proton-shared/lib/helpers/string';
 import { contentType } from 'mime-types';
 
 /**
@@ -11,10 +10,13 @@ function createDownloadStream(port: MessagePort) {
     return new ReadableStream({
         start(controller: ReadableStreamDefaultController) {
             port.onmessage = ({ data }) => {
-                if (data?.action === 'end') {
-                    return controller.close();
-                } else if (data?.action === 'download_chunk') {
-                    controller.enqueue(data?.payload);
+                switch (data?.action) {
+                    case 'end':
+                        return controller.close();
+                    case 'download_chunk':
+                        return controller.enqueue(data?.payload);
+                    case 'abort':
+                        return controller.error(data?.reason);
                 }
             };
         },
@@ -87,8 +89,8 @@ class DownloadServiceWorker {
             return;
         }
 
-        const downloadUrl = (self as any).registration.scope + `sw/${getRandomString(32)}`;
         const { filename, mimeType, size } = event.data.payload;
+        const downloadUrl = encodeURI((self as any).registration.scope + `sw/${Math.random()}/` + filename);
 
         const port = event.ports[0];
 

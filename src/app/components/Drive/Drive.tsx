@@ -1,17 +1,15 @@
 import React, { useCallback } from 'react';
 import { useMainArea } from 'react-components';
-import { ResourceType } from '../../interfaces/link';
 import useFiles from '../../hooks/useFiles';
 import useOnScrollEnd from '../../hooks/useOnScrollEnd';
-import { FOLDER_PAGE_SIZE } from '../../constants';
 import FileBrowser, { FileBrowserItem } from '../FileBrowser/FileBrowser';
-import { DriveResource } from './DriveResourceProvider';
+import { DriveFolder } from './DriveFolderProvider';
 import { TransferMeta } from '../../interfaces/transfer';
 import FileSaver from '../../utils/FileSaver/FileSaver';
 import { isPreviewAvailable } from '../FilePreview/FilePreview';
 import { useDriveContent } from './DriveContentProvider';
 import EmptyFolder from '../FileBrowser/EmptyFolder';
-import { LinkMeta } from '../../interfaces/link';
+import { LinkMeta, LinkType } from '../../interfaces/link';
 
 export const getMetaForTransfer = (item: FileBrowserItem | LinkMeta): TransferMeta => {
     return {
@@ -22,61 +20,54 @@ export const getMetaForTransfer = (item: FileBrowserItem | LinkMeta): TransferMe
 };
 
 interface Props {
-    resource: DriveResource;
-    openResource: (resource: DriveResource, item?: FileBrowserItem) => void;
+    activeFolder: DriveFolder;
+    openLink: (shareId: string, linkId: string, type: LinkType) => void;
 }
 
-function Drive({ resource, openResource }: Props) {
+function Drive({ activeFolder, openLink }: Props) {
     const mainAreaRef = useMainArea();
-    const { startFileTransfer } = useFiles(resource.shareId);
-    const { addToLoadQueue, fileBrowserControls, loading, contents } = useDriveContent();
+    const { startFileTransfer } = useFiles();
+    const { loadNextPage, fileBrowserControls, loading, contents, complete, initialized } = useDriveContent();
 
-    const {
-        clearSelections,
-        selectedItems,
-        selectItem,
-        toggleSelectItem,
-        toggleAllSelected,
-        selectRange
-    } = fileBrowserControls;
+    const { clearSelections, selectedItems, toggleSelectItem, toggleAllSelected, selectRange } = fileBrowserControls;
 
     const handleScrollEnd = useCallback(() => {
-        if (loading || contents.done) {
-            return;
+        // Only load on scroll after initial load from backend
+        if (initialized && !complete) {
+            loadNextPage();
         }
-        const loadedCount = contents.items.length;
-        const page = loadedCount / FOLDER_PAGE_SIZE;
-        addToLoadQueue(resource, page);
-    }, [contents, loading]);
+    }, [initialized, complete, loadNextPage]);
 
-    useOnScrollEnd(handleScrollEnd, mainAreaRef, 0.9);
+    // On content change, check scroll end (does not rebind listeners)
+    useOnScrollEnd(handleScrollEnd, mainAreaRef, 0.9, [contents]);
 
-    const handleDoubleClick = async (item: FileBrowserItem) => {
+    const handleClick = async (item: FileBrowserItem) => {
         document.getSelection()?.removeAllRanges();
-        const driveResource = { shareId: resource.shareId, linkId: item.LinkID, type: item.Type };
-        if (item.Type === ResourceType.FOLDER) {
-            openResource(driveResource, item);
-        } else if (item.Type === ResourceType.FILE) {
+        const { shareId } = activeFolder;
+
+        if (item.Type === LinkType.FOLDER) {
+            openLink(shareId, item.LinkID, item.Type);
+        } else if (item.Type === LinkType.FILE) {
             if (item.MimeType && isPreviewAvailable(item.MimeType)) {
-                openResource(driveResource, item);
+                openLink(shareId, item.LinkID, item.Type);
             } else {
                 const meta = getMetaForTransfer(item);
-                const fileStream = await startFileTransfer(item.LinkID, meta);
+                const fileStream = await startFileTransfer(shareId, item.LinkID, meta);
                 FileSaver.saveViaDownload(fileStream, meta);
             }
         }
     };
 
-    return contents.done && !contents.items.length && !loading ? (
+    return complete && !contents.length && !loading ? (
         <EmptyFolder />
     ) : (
         <FileBrowser
+            shareId={activeFolder.shareId}
             loading={loading}
-            contents={contents.items}
+            contents={contents}
             selectedItems={selectedItems}
-            onItemClick={selectItem}
+            onItemClick={handleClick}
             onToggleItemSelected={toggleSelectItem}
-            onItemDoubleClick={handleDoubleClick}
             onEmptyAreaClick={clearSelections}
             onToggleAllSelected={toggleAllSelected}
             onShiftClick={selectRange}

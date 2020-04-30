@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { ErrorBoundary, GenericError, generateUID, IllustrationPlaceholder } from 'react-components';
+import {
+    ErrorBoundary,
+    GenericError,
+    generateUID,
+    InternalServerError,
+    NotFoundError,
+    AccessDeniedError
+} from 'react-components';
 import { withRouter, RouteComponentProps } from 'react-router-dom';
-import { c } from 'ttag';
-import internalServerErrorSvg from 'design-system/assets/img/shared/internal-server-error.svg';
-import notFoundErrorSvg from 'design-system/assets/img/shared/page-not-found.svg';
-import noAccessErrorSvg from 'design-system/assets/img/shared/no-access-page.svg';
-import { useDriveResource } from './Drive/DriveResourceProvider';
+import { useDriveActiveFolder } from './Drive/DriveFolderProvider';
 
 interface ApiError extends Error {
     response: Response;
@@ -16,7 +19,7 @@ interface Props extends RouteComponentProps {
 }
 
 const AppErrorBoundary = ({ children, location }: Props) => {
-    const { setResource } = useDriveResource();
+    const { setFolder } = useDriveActiveFolder();
     const [state, setState] = useState<{ id: string; error?: Error }>({
         id: generateUID('error-boundary')
     });
@@ -29,7 +32,7 @@ const AppErrorBoundary = ({ children, location }: Props) => {
 
     const handleError = (error: Error) => {
         setState((prev) => ({ ...prev, error }));
-        setResource(undefined);
+        setFolder(undefined);
     };
 
     const renderError = () => {
@@ -44,22 +47,11 @@ const AppErrorBoundary = ({ children, location }: Props) => {
         const response = (state.error as ApiError).response;
 
         if (response.status === 500) {
-            return (
-                <IllustrationPlaceholder
-                    title={c('Error message').t`Internal server error`}
-                    text={
-                        <>
-                            <span>{c('Error message').t`Brace yourself till we get the error fixed.`}</span>
-                            <span>{c('Error message').t`You may also refresh the page or try again later.`}</span>
-                        </>
-                    }
-                    url={internalServerErrorSvg}
-                />
-            );
+            return <InternalServerError />;
         } else if (response.status === 404) {
-            return <IllustrationPlaceholder title={c('Error message').t`Not found`} url={notFoundErrorSvg} />;
+            return <NotFoundError />;
         } else if (response.status === 403) {
-            return <IllustrationPlaceholder title={c('Error message').t`Access denied`} url={noAccessErrorSvg} />;
+            return <AccessDeniedError />;
         }
     };
 

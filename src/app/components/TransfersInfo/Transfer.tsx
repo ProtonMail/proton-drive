@@ -1,14 +1,14 @@
 import React from 'react';
 import humanSize from 'proton-shared/lib/helpers/humanSize';
 import { c } from 'ttag';
-import { Icon } from 'react-components';
+import { Icon, classnames } from 'react-components';
 import { Download } from '../downloads/DownloadProvider';
 import { Upload } from '../uploads/UploadProvider';
 import ProgressBar, { ProgressBarStatus } from './ProgressBar';
-import uploadSvg from './upload.svg';
-import downloadSvg from './download.svg';
 import { TransferState } from '../../interfaces/transfer';
 import TransferStateIndicator from './TransferStateIndicator';
+import TransferControls from './TransferControls';
+import FileIcon from '../FileIcon';
 
 export enum TransferType {
     Download = 'download',
@@ -40,32 +40,52 @@ const Transfer = ({ transfer, type, stats = { progress: 0, speed: 0 } }: Props) 
 
     const isProgress = transfer.state === TransferState.Progress;
     const isError = transfer.state === TransferState.Canceled || transfer.state === TransferState.Error;
+    const isDone = transfer.state === TransferState.Done;
+    const isInitializing = transfer.state === TransferState.Initializing;
+    const isCanceled = transfer.state === TransferState.Canceled;
 
     // If file size is 0, progress and file size are changed to 1/1, so that the bar is complete
     const progress = fileSize === 0 ? 1 : stats.progress;
+    const speed = humanSize(stats.speed);
+    const hasControls = type === TransferType.Download || isError || isDone;
 
     return (
-        <div className="pd-transfers-listItem pb1 pt1 ml1 mr1">
-            <div className="pd-transfers-listItemDetails">
-                {type === TransferType.Download ? (
-                    <img className="mr1 flex-item-noshrink" src={downloadSvg} alt={c('Info').t`Download`} />
-                ) : (
-                    <img className="mr1 flex-item-noshrink" src={uploadSvg} alt={c('Info').t`Upload`} />
-                )}
-                <Icon name="drafts" className="mr0-5 flex-item-noshrink color-global-altgrey" size={25} />
-                <div className="pd-transfers-listItemName">
-                    <span className="ellipsis" title={transfer.meta.filename}>
+        <div
+            className={classnames([
+                'pd-transfers-listItem pb1 pt1 ml1 mr1',
+                hasControls && 'pd-transfers--hasControls'
+            ])}
+        >
+            <div className="flex flex-nowrap flex-spacebetween flex-items-center">
+                <Icon
+                    name={type === TransferType.Download ? 'download' : 'upload'}
+                    className="pd-transfers-listItemTypeIcon mr0-5 flex-item-noshrink"
+                    size={24}
+                />
+
+                <FileIcon mimeType={transfer.meta.mimeType} aria-busy={isInitializing} />
+
+                <div className="flex flex-item-fluid">
+                    <span
+                        className={classnames(['ellipsis', isInitializing && 'opacity-50'])}
+                        title={transfer.meta.filename}
+                    >
                         {transfer.meta.filename}
                     </span>
                 </div>
-                <div className="pd-transfers-listItemStats">
-                    <span className="pd-transfers-listItemStat ml0-5">{humanSize(fileSize)}</span>
-                    {isProgress && <span className="pd-transfers-listItemStat ml0-5">{humanSize(stats.speed)}/s</span>}
+
+                <div className="pd-transfers-listItemStats flex-item-noshrink flex flex-spacebetween flex-nowrap">
+                    <span className="pd-transfers-listItemStat alignright notinymobile">{humanSize(fileSize)}</span>
+                    {isProgress && (
+                        <span className="pd-transfers-listItemStat alignright notinymobile">{c('Info')
+                            .t`${speed}/s`}</span>
+                    )}
+                    {hasControls && <TransferControls transfer={transfer} type={type} />}
                     <TransferStateIndicator transfer={transfer} percentageDone={percentageDone} />
                 </div>
             </div>
             <ProgressBar
-                status={isError ? ProgressBarStatus.Error : ProgressBarStatus.Success}
+                status={isError || isCanceled ? ProgressBarStatus.Error : ProgressBarStatus.Success}
                 aria-describedby={transfer.id}
                 value={progress}
                 max={fileSize || 1}

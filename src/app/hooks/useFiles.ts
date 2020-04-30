@@ -1,9 +1,10 @@
 import { useCallback } from 'react';
-import { useApi, useEventManager } from 'react-components';
+import { useApi, useEventManager, useUser, useNotifications } from 'react-components';
 import { ReadableStream } from 'web-streams-polyfill';
 import { DriveFileRevisionResult, CreateFileResult, FileRevisionState, RequestUploadResult } from '../interfaces/file';
 import { decryptMessage, encryptMessage } from 'pmcrypto';
-import useShare, { FileLinkMetaResult } from './useShare';
+import { c } from 'ttag';
+import { lookup } from 'mime-types';
 import { queryFileRevision, queryCreateFile, queryUpdateFileRevision, queryRequestUpload } from '../api/files';
 import {
     generateNodeKeys,
@@ -13,108 +14,94 @@ import {
     getStreamMessage,
     generateContentHash
 } from 'proton-shared/lib/keys/driveKeys';
-import { FOLDER_PAGE_SIZE } from '../constants';
+import { binaryStringToArray } from 'proton-shared/lib/helpers/string';
+import { range } from 'proton-shared/lib/helpers/array';
+import isTruthy from 'proton-shared/lib/helpers/isTruthy';
+import humanSize from 'proton-shared/lib/helpers/humanSize';
+import { splitExtension } from 'proton-shared/lib/helpers/file';
+import { noop } from 'proton-shared/lib/helpers/function';
 import { useUploadProvider, BlockMeta } from '../components/uploads/UploadProvider';
-import { TransferMeta } from '../interfaces/transfer';
+import { TransferMeta, TransferState } from '../interfaces/transfer';
 import { useDownloadProvider } from '../components/downloads/DownloadProvider';
 import { initDownload, StreamTransformer } from '../components/downloads/download';
 import { streamToBuffer } from '../utils/stream';
-import { HashCheckResult, isFileLinkMeta, FileLinkMeta } from '../interfaces/link';
-import { lookup } from 'mime-types';
-import { noop } from 'proton-shared/lib/helpers/function';
-import useDriveCrypto from './useDriveCrypto';
-import { binaryStringToArray } from 'proton-shared/lib/helpers/string';
-import useCachedResponse from './useCachedResponse';
-import { range } from 'proton-shared/lib/helpers/array';
+import { HashCheckResult, LinkType } from '../interfaces/link';
 import { queryCheckAvailableHashes } from '../api/link';
-import { splitExtension } from 'proton-shared/lib/helpers/file';
-import isTruthy from 'proton-shared/lib/helpers/isTruthy';
-import { ResourceType } from '../interfaces/link';
+import { ValidationError, validateLinkName } from '../utils/validation';
+import useDriveCrypto from './useDriveCrypto';
+import useDrive from './useDrive';
+import useDebouncedPromise from './useDebouncedPromise';
+import { FILE_CHUNK_SIZE } from '../constants';
+import useQueuedFunction from './useQueuedFunction';
 
 const HASH_CHECK_AMOUNT = 10;
 
-function useFiles(shareId: string) {
+function useFiles() {
     const api = useApi();
-    const { getCachedResponse } = useCachedResponse();
+    const debouncedRequest = useDebouncedPromise();
+    const queuedFunction = useQueuedFunction();
+    const { createNotification } = useNotifications();
     const { getPrimaryAddressKey, sign } = useDriveCrypto();
-    const { getLinkMeta, clearFolderContentsCache, getFolderMeta } = useShare(shareId);
+    const { getLinkMeta, getLinkKeys, events } = useDrive();
     const { addToDownloadQueue } = useDownloadProvider();
-    const { addToUploadQueue, uploads } = useUploadProvider();
+    const { addToUploadQueue, getUploadsImmediate, getUploadsProgresses } = useUploadProvider();
+    const [{ MaxSpace, UsedSpace }] = useUser();
     const { call } = useEventManager();
 
-    const getFileMeta = useCallback(
-        async (linkId: string) => {
-            const result = await getLinkMeta(linkId);
+    const findAvailableName = async (
+        shareId: string,
+        parentLinkID: string,
+        filename: string,
+        start = 0
+    ): Promise<{ filename: string; hash: string }> => {
+        const parentKeys = await getLinkKeys(shareId, parentLinkID);
 
-            if (!isFileLinkMeta(result.Link)) {
-                throw new Error(`Invalid link metadata, expected File (${ResourceType.FILE}), got ${result.Link.Type}`);
+        if (!('hashKey' in parentKeys)) {
+            throw Error('Missing hash key on folder link');
+        }
+
+        const [namePart, extension] = splitExtension(filename);
+
+        const adjustName = (i: number) => {
+            if (i === 0) {
+                return filename;
             }
 
-            const { Link: File, ...rest } = result as FileLinkMetaResult;
-
-            return {
-                File,
-                ...rest
-            };
-        },
-        [shareId, getLinkMeta]
-    );
-
-    const findAvailableName = useCallback(
-        async (parentLinkID: string, filename: string, start = 0): Promise<{ filename: string; hash: string }> => {
-            const { keys: parentKeys } = await getFolderMeta(parentLinkID);
-            const [namePart, extension] = splitExtension(filename);
-
-            const adjustName = (i: number) => {
-                if (i === 0) {
-                    return filename;
-                }
-
-                if (!namePart) {
-                    return [`.${extension}`, `(${i})`].filter(isTruthy).join(' ');
-                }
-
-                const newNamePart = [namePart, `(${i})`].filter(isTruthy).join(' ');
-                return extension ? [newNamePart, extension].join('.') : newNamePart;
-            };
-
-            const hashesToCheck = await Promise.all(
-                range(start, start + HASH_CHECK_AMOUNT).map(async (i) => {
-                    const adjustedFileName = adjustName(i);
-                    return {
-                        filename: adjustedFileName,
-                        hash: await generateLookupHash(adjustedFileName.toLowerCase(), parentKeys.hashKey)
-                    };
-                })
-            );
-
-            const Hashes = hashesToCheck.map(({ hash }) => hash);
-            const { AvailableHashes } = await api<HashCheckResult>(
-                queryCheckAvailableHashes(shareId, parentLinkID, { Hashes })
-            );
-
-            if (!AvailableHashes.length) {
-                return findAvailableName(parentLinkID, filename, start + HASH_CHECK_AMOUNT);
+            if (!namePart) {
+                return [`.${extension}`, `(${i})`].filter(isTruthy).join(' ');
             }
 
-            const availableName = hashesToCheck.find(({ hash }) => hash === AvailableHashes[0]);
+            const newNamePart = [namePart, `(${i})`].filter(isTruthy).join(' ');
+            return extension ? [newNamePart, extension].join('.') : newNamePart;
+        };
 
-            if (!availableName) {
-                throw new Error('Backend returned unexpected hash');
-            }
+        const hashesToCheck = await Promise.all(
+            range(start, start + HASH_CHECK_AMOUNT).map(async (i) => {
+                const adjustedFileName = adjustName(i);
+                return {
+                    filename: adjustedFileName,
+                    hash: await generateLookupHash(adjustedFileName.toLowerCase(), parentKeys.hashKey)
+                };
+            })
+        );
 
-            return availableName;
-        },
-        [shareId, api, getFolderMeta]
-    );
+        const Hashes = hashesToCheck.map(({ hash }) => hash);
+        const { AvailableHashes } = await debouncedRequest<HashCheckResult>(
+            queryCheckAvailableHashes(shareId, parentLinkID, { Hashes })
+        );
 
-    const getFileRevision = useCallback(
-        async ({ LinkID, FileProperties: { ActiveRevision } }: FileLinkMeta) =>
-            getCachedResponse(`drive/shares/${shareId}/file/${LinkID}/${ActiveRevision.ID}`, () =>
-                api<DriveFileRevisionResult>(queryFileRevision(shareId, LinkID, ActiveRevision.ID))
-            ),
-        [shareId, api, getCachedResponse]
-    );
+        if (!AvailableHashes.length) {
+            return findAvailableName(shareId, parentLinkID, filename, start + HASH_CHECK_AMOUNT);
+        }
+
+        const availableName = hashesToCheck.find(({ hash }) => hash === AvailableHashes[0]);
+
+        if (!availableName) {
+            throw new Error('Backend returned unexpected hash');
+        }
+
+        return availableName;
+    };
 
     const generateRootHash = useCallback(
         async (PreviousRootHash: string | null, blockMeta: BlockMeta[]) => {
@@ -140,10 +127,16 @@ function useFiles(shareId: string) {
         [sign]
     );
 
-    const uploadDriveFile = useCallback(
-        async (ParentLinkID: string, file: File) => {
-            const [{ keys: parentKeys }, addressKeyInfo] = await Promise.all([
-                getFolderMeta(ParentLinkID),
+    const uploadDriveFile = async (shareId: string, ParentLinkID: string, file: File) => {
+        const setupPromise = (async () => {
+            const error = validateLinkName(file.name);
+
+            if (error) {
+                throw new ValidationError(error);
+            }
+
+            const [parentKeys, addressKeyInfo] = await Promise.all([
+                getLinkKeys(shareId, ParentLinkID),
                 getPrimaryAddressKey()
             ]);
 
@@ -158,18 +151,17 @@ function useFiles(shareId: string) {
                 throw new Error('Could not generate ContentKeyPacket');
             }
 
-            // TODO: create initially with original name, rename after check is done
-            const { filename, hash: Hash } = await findAvailableName(ParentLinkID, file.name);
+            const { filename, hash: Hash } = await findAvailableName(shareId, ParentLinkID, file.name);
             const blob = new Blob([file], { type: file.type });
 
             const Name = await encryptUnsigned({
                 message: filename,
-                privateKey: parentKeys.privateKey
+                publicKey: parentKeys.privateKey.toPublic()
             });
 
             const MimeType = lookup(filename) || 'application/octet-stream';
 
-            const { File } = await api<CreateFileResult>(
+            const { File } = await debouncedRequest<CreateFileResult>(
                 queryCreateFile(shareId, {
                     Name,
                     MimeType,
@@ -183,78 +175,137 @@ function useFiles(shareId: string) {
                 })
             );
 
-            addToUploadQueue(
-                {
+            return {
+                File,
+                blob,
+                Name,
+                MimeType,
+                sessionKey,
+                filename,
+                addressKeyInfo
+            };
+        })();
+
+        addToUploadQueue(
+            file,
+            setupPromise.then(({ blob, MimeType, File, filename }) => ({
+                meta: {
                     size: blob.size,
                     mimeType: MimeType,
                     filename
                 },
-                {
+                info: {
                     blob,
                     ParentLinkID,
                     LinkID: File.ID,
                     RevisionID: File.RevisionID,
                     ShareID: shareId
-                },
-                {
-                    transform: async (data) => {
-                        const res = await encryptMessage({
-                            data,
-                            sessionKey,
-                            armor: false
-                        });
-                        return res.message.packets.write() as Uint8Array;
-                    },
-                    requestUpload: async (BlockList) => {
-                        const { signature, address } = await sign(JSON.stringify(BlockList), addressKeyInfo);
-
-                        const { UploadLinks } = await api<RequestUploadResult>(
-                            queryRequestUpload({
-                                BlockList,
-                                AddressID: address.ID,
-                                Signature: signature,
-                                LinkID: File.ID,
-                                RevisionID: File.RevisionID,
-                                ShareID: shareId
-                            })
-                        );
-                        return UploadLinks;
-                    },
-                    finalize: async (blockMeta) => {
-                        const rootHash = await generateRootHash(null, blockMeta);
-                        await api(
-                            queryUpdateFileRevision(shareId, File.ID, File.RevisionID, {
-                                State: FileRevisionState.Active,
-                                BlockList: blockMeta.map(({ Index, Token }) => ({
-                                    Index,
-                                    Token
-                                })),
-                                ...rootHash
-                            })
-                        );
-
-                        // TODO: clear all cached pages after upload, or only last one
-                        clearFolderContentsCache(ParentLinkID, 0, FOLDER_PAGE_SIZE);
-
-                        // Update quota metrics
-                        call();
-                    }
                 }
-            );
-        },
-        [shareId, uploads]
+            })),
+            {
+                transform: async (data) => {
+                    const { sessionKey } = await setupPromise;
+
+                    const res = await encryptMessage({
+                        data,
+                        sessionKey,
+                        armor: false
+                    });
+                    return res.message.packets.write() as Uint8Array;
+                },
+                requestUpload: async (BlockList) => {
+                    const { File, addressKeyInfo } = await setupPromise;
+                    const { signature, address } = await sign(JSON.stringify(BlockList), addressKeyInfo);
+
+                    const { UploadLinks } = await debouncedRequest<RequestUploadResult>(
+                        queryRequestUpload({
+                            BlockList,
+                            AddressID: address.ID,
+                            Signature: signature,
+                            LinkID: File.ID,
+                            RevisionID: File.RevisionID,
+                            ShareID: shareId
+                        })
+                    );
+                    return UploadLinks;
+                },
+                finalize: async (blockMeta) => {
+                    const [{ File }, rootHash] = await Promise.all([setupPromise, generateRootHash(null, blockMeta)]);
+                    await debouncedRequest(
+                        queryUpdateFileRevision(shareId, File.ID, File.RevisionID, {
+                            State: FileRevisionState.Active,
+                            BlockList: blockMeta.map(({ Index, Token }) => ({
+                                Index,
+                                Token
+                            })),
+                            ...rootHash
+                        })
+                    );
+
+                    // Update quota metrics and drive links
+                    call();
+                    events.call(shareId);
+                }
+            }
+        );
+    };
+
+    const checkHasEnoughSpace = async (files: FileList | File[]) => {
+        const calculateRemainingUploadBytes = () => {
+            const uploads = getUploadsImmediate();
+            const progresses = getUploadsProgresses();
+            return uploads.reduce((sum, upload) => {
+                const uploadedChunksSize = progresses[upload.id] - (progresses[upload.id] % FILE_CHUNK_SIZE);
+                return [TransferState.Initializing, TransferState.Pending, TransferState.Progress].includes(
+                    upload.state
+                )
+                    ? sum + upload.meta.size - uploadedChunksSize
+                    : sum;
+            }, 0);
+        };
+
+        let totalFileListSize = 0;
+        for (let i = 0; i < files.length; i++) {
+            totalFileListSize += files[i].size;
+        }
+
+        const remaining = calculateRemainingUploadBytes();
+        await call();
+        const result = MaxSpace > UsedSpace + remaining + totalFileListSize;
+        return { result, total: totalFileListSize };
+    };
+
+    const uploadDriveFiles = queuedFunction(
+        'uploadDriveFiles',
+        async (shareId: string, ParentLinkID: string, files: FileList | File[]) => {
+            const { result, total } = await checkHasEnoughSpace(files);
+            const formattedRemaining = humanSize(total);
+            if (!result) {
+                createNotification({
+                    text: c('Notification').t`Not enough space to upload ${formattedRemaining}`,
+                    type: 'error'
+                });
+                throw new Error('Insufficient storage left');
+            }
+
+            for (let i = 0; i < files.length; i++) {
+                uploadDriveFile(shareId, ParentLinkID, files[i]);
+            }
+        }
     );
 
-    const decryptBlockStream = (linkId: string): StreamTransformer => async (stream) => {
+    const decryptBlockStream = (shareId: string, linkId: string): StreamTransformer => async (stream) => {
         // TODO: implement root hash validation when file updates are implemented
-        const {
-            keys: { privateKey, sessionKeys }
-        } = await getFileMeta(linkId);
-        const publicKeys = privateKey.toPublic();
+        const keys = await getLinkKeys(shareId, linkId);
+
+        if (!('sessionKeys' in keys)) {
+            throw new Error('Session key missing on file link');
+        }
+
         const { data } = await decryptMessage({
             message: await getStreamMessage(stream),
-            sessionKeys,
-            publicKeys,
+            sessionKeys: keys.sessionKeys,
+            publicKeys: keys.privateKey.toPublic(),
             streaming: 'web',
             format: 'binary'
         });
@@ -262,39 +313,51 @@ function useFiles(shareId: string) {
         return data as ReadableStream<Uint8Array>;
     };
 
-    const getFileBlocks = async (linkId: string) => {
-        const { File } = await getFileMeta(linkId);
-        const { Revision } = await getFileRevision(File);
+    const getFileRevision = async (shareId: string, linkId: string): Promise<DriveFileRevisionResult> => {
+        let fileMeta = await getLinkMeta(shareId, linkId);
+
+        if (!fileMeta.FileProperties?.ActiveRevision) {
+            fileMeta = await getLinkMeta(shareId, linkId, { skipCache: true });
+        }
+
+        const revision = fileMeta.FileProperties?.ActiveRevision;
+
+        if (!revision) {
+            throw new Error(`Invalid link metadata, expected File (${LinkType.FILE}), got ${fileMeta.Type}`);
+        }
+
+        return debouncedRequest<DriveFileRevisionResult>(queryFileRevision(shareId, linkId, revision.ID));
+    };
+
+    const getFileBlocks = async (shareId: string, linkId: string) => {
+        const { Revision } = await getFileRevision(shareId, linkId);
         return Revision.Blocks;
     };
 
-    const downloadDriveFile = useCallback(
-        async (linkId: string) => {
-            let resolve: (value: Promise<Uint8Array[]>) => void = noop;
-            let reject: (reason?: any) => any = noop;
+    const downloadDriveFile = async (shareId: string, linkId: string) => {
+        let resolve: (value: Promise<Uint8Array[]>) => void = noop;
+        let reject: (reason?: any) => any = noop;
 
-            const contentsPromise = new Promise<Uint8Array[]>((res, rej) => {
-                resolve = res;
-                reject = rej;
-            });
+        const contentsPromise = new Promise<Uint8Array[]>((res, rej) => {
+            resolve = res;
+            reject = rej;
+        });
 
-            const { downloadControls } = initDownload({
-                transformBlockStream: decryptBlockStream(linkId),
-                onStart: async (stream) => {
-                    resolve(streamToBuffer(stream));
-                    return getFileBlocks(linkId);
-                }
-            });
+        const { downloadControls } = initDownload({
+            transformBlockStream: decryptBlockStream(shareId, linkId),
+            onStart: async (stream) => {
+                resolve(streamToBuffer(stream));
+                return getFileBlocks(shareId, linkId);
+            }
+        });
 
-            downloadControls.start(api).catch(reject);
+        downloadControls.start(api).catch(reject);
 
-            return {
-                contents: contentsPromise,
-                controls: downloadControls
-            };
-        },
-        [shareId]
-    );
+        return {
+            contents: contentsPromise,
+            controls: downloadControls
+        };
+    };
 
     const saveFileTransferFromBuffer = async (content: Uint8Array[], meta: TransferMeta) => {
         return addToDownloadQueue(meta, {
@@ -302,21 +365,18 @@ function useFiles(shareId: string) {
         });
     };
 
-    const startFileTransfer = useCallback(
-        (linkId: string, meta: TransferMeta) => {
-            return addToDownloadQueue(meta, {
-                transformBlockStream: decryptBlockStream(linkId),
-                onStart: () => getFileBlocks(linkId)
-            });
-        },
-        [shareId]
-    );
+    const startFileTransfer = (shareId: string, linkId: string, meta: TransferMeta) => {
+        return addToDownloadQueue(meta, {
+            transformBlockStream: decryptBlockStream(shareId, linkId),
+            onStart: async () => getFileBlocks(shareId, linkId)
+        });
+    };
 
     return {
         startFileTransfer,
         uploadDriveFile,
+        uploadDriveFiles,
         downloadDriveFile,
-        getFileMeta,
         saveFileTransferFromBuffer
     };
 }

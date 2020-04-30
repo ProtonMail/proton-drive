@@ -1,11 +1,21 @@
 import { FileRevisionState } from './file';
 
-export enum ResourceType {
+export enum LinkType {
     FOLDER = 1,
     FILE = 2
 }
 interface FileProperties {
     ContentKeyPacket: string;
+    ActiveRevision: {
+        ID: number;
+        Created: number;
+        Size: number;
+        Hash: string;
+        RootHash: string;
+        RootHashSignature: string;
+        AuthorAddressID: string;
+        State: FileRevisionState;
+    } | null;
 }
 
 interface FolderProperties {
@@ -15,7 +25,7 @@ interface FolderProperties {
 interface DriveLink {
     LinkID: string;
     ParentLinkID: string;
-    Type: ResourceType;
+    Type: LinkType;
     Name: string;
     Size: number;
     MimeType: string;
@@ -33,39 +43,21 @@ interface DriveLink {
     FolderProperties: FolderProperties | null;
 }
 
-export interface FileLinkShortMeta extends DriveLink {
-    Type: ResourceType.FILE;
+export interface FileLinkMeta extends DriveLink {
+    Type: LinkType.FILE;
     FileProperties: FileProperties;
     FolderProperties: null;
 }
 
-export interface FileLinkMeta extends FileLinkShortMeta {
-    FileProperties: FileProperties & {
-        ActiveRevision: {
-            ID: number;
-            Created: number;
-            Size: number;
-            Hash: string;
-            RootHash: string;
-            RootHashSignature: string;
-            AuthorAddressID: string;
-            State: FileRevisionState;
-        };
-    };
-}
-
 export interface FolderLinkMeta extends DriveLink {
-    Type: ResourceType.FOLDER;
+    Type: LinkType.FOLDER;
     FolderProperties: FolderProperties;
     FileProperties: null;
 }
 
 export type LinkMeta = FileLinkMeta | FolderLinkMeta;
-export type LinkShortMeta = FolderLinkMeta | FileLinkShortMeta;
 
-export const isFolderLinkMeta = (link: LinkMeta | LinkShortMeta): link is FolderLinkMeta =>
-    link.Type === ResourceType.FOLDER;
-export const isFileLinkMeta = (link: LinkMeta): link is FileLinkMeta => link.Type === ResourceType.FILE;
+export const isFolderLinkMeta = (link: LinkMeta): link is FolderLinkMeta => link.Type === LinkType.FOLDER;
 
 export interface LinkMetaResult {
     Link: LinkMeta;

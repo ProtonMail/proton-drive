@@ -1,20 +1,23 @@
 import React, { useRef } from 'react';
-import { TableRow, Checkbox, Time, Icon, useActiveBreakpoint } from 'react-components';
+import { TableRow, Checkbox, Time, useActiveBreakpoint } from 'react-components';
 import { c } from 'ttag';
 import humanSize from 'proton-shared/lib/helpers/humanSize';
-import { ResourceType } from '../../interfaces/link';
+import { LinkType } from '../../interfaces/link';
 import { FileBrowserItem } from './FileBrowser';
+import MimeIcon from '../FileIcon';
+import LocationCell from './LocationCell';
 
 interface Props {
     item: FileBrowserItem;
+    shareId: string;
     selectedItems: FileBrowserItem[];
     onToggleSelect: (item: string) => void;
-    onClick: (item: string) => void;
-    onDoubleClick: (item: FileBrowserItem) => void;
     onShiftClick: (item: string) => void;
+    onClick?: (item: FileBrowserItem) => void;
+    showLocation?: boolean;
 }
 
-const ItemRow = ({ item, selectedItems, onToggleSelect, onClick, onDoubleClick, onShiftClick }: Props) => {
+const ItemRow = ({ item, shareId, selectedItems, onToggleSelect, onClick, onShiftClick, showLocation }: Props) => {
     const { isDesktop } = useActiveBreakpoint();
     const touchStarted = useRef(false);
 
@@ -25,7 +28,7 @@ const ItemRow = ({ item, selectedItems, onToggleSelect, onClick, onDoubleClick, 
         } else if (e.ctrlKey || e.metaKey) {
             onToggleSelect(item.LinkID);
         } else {
-            onClick(item.LinkID);
+            onClick?.(item);
         }
     };
 
@@ -42,58 +45,52 @@ const ItemRow = ({ item, selectedItems, onToggleSelect, onClick, onDoubleClick, 
 
     const handleTouchEnd = () => {
         if (touchStarted.current) {
-            onDoubleClick(item);
+            onClick?.(item);
         }
         touchStarted.current = false;
     };
 
-    const handleRowDoubleClick = (e: React.MouseEvent<HTMLTableRowElement>) => {
-        e.stopPropagation();
-        onDoubleClick(item);
-    };
-
-    const isFolder = item.Type === ResourceType.FOLDER;
+    const isFolder = item.Type === LinkType.FOLDER;
     const isSelected = selectedItems.some(({ LinkID }) => item.LinkID === LinkID);
+    const cells = [
+        <div
+            key="select"
+            className="flex"
+            onClick={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+        >
+            <Checkbox
+                className="increase-surface-click"
+                checked={isSelected}
+                onChange={() => onToggleSelect(item.LinkID)}
+            />
+        </div>,
+        <div key="filename" className="flex flex-items-center flex-nowrap">
+            <MimeIcon mimeType={item.Type === LinkType.FOLDER ? 'Folder' : item.MimeType} />
+            <span title={item.Name} className="pd-fb-table-row-name">
+                {item.Name}
+            </span>
+        </div>,
+        showLocation && <LocationCell shareId={shareId} item={item} />,
+        isFolder ? c('Label').t`Folder` : c('Label').t`File`,
+        isDesktop && (
+            <Time key="dateModified" format="PPp">
+                {item.Modified}
+            </Time>
+        ),
+        item.Size ? humanSize(item.Size) : '-'
+    ].filter(Boolean);
 
     return (
         <TableRow
             className="pd-fb-table-row"
             onMouseDown={() => document.getSelection()?.removeAllRanges()}
             onClick={handleRowClick}
-            onDoubleClick={handleRowDoubleClick}
             onTouchStart={handleTouchStart}
             onTouchMove={handleTouchCancel}
             onTouchCancel={handleTouchCancel}
             onTouchEnd={handleTouchEnd}
-            cells={[
-                <div
-                    key="select"
-                    onClick={(e) => e.stopPropagation()}
-                    onTouchStart={(e) => e.stopPropagation()}
-                    onDoubleClick={(e) => e.stopPropagation()}
-                >
-                    <Checkbox checked={isSelected} onChange={() => onToggleSelect(item.LinkID)} />
-                </div>,
-                <div key="filename" className="flex flex-items-center flex-nowrap">
-                    <Icon
-                        name={isFolder ? 'folder' : 'drafts'}
-                        className={`mr0-5 flex-item-noshrink ${
-                            isFolder ? 'color-global-attention' : 'color-global-altgrey'
-                        }`}
-                        size={25}
-                    />
-                    <span title={item.Name} className="pd-fb-table-row-name">
-                        {item.Name}
-                    </span>
-                </div>,
-                isFolder ? c('Label').t`Folder` : c('Label').t`File`,
-                isDesktop && (
-                    <Time key="dateModified" format="PPp">
-                        {item.Modified}
-                    </Time>
-                ),
-                item.Size ? humanSize(item.Size) : '-'
-            ].filter(Boolean)}
+            cells={cells}
         />
     );
 };

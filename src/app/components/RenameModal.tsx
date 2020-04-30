@@ -1,23 +1,21 @@
 import React, { useState, ChangeEvent, FocusEvent } from 'react';
 import { FormModal, Input, Row, Label, Field, useLoading, useNotifications } from 'react-components';
 import { c } from 'ttag';
-import useShare from '../hooks/useShare';
 import { FileBrowserItem } from './FileBrowser/FileBrowser';
 import { splitExtension } from 'proton-shared/lib/helpers/file';
-import { ResourceType } from '../interfaces/link';
+import { LinkType } from '../interfaces/link';
+import { validateLinkName } from '../utils/validation';
 
 interface Props {
     onClose?: () => void;
-    onDone?: () => void;
     item: FileBrowserItem;
-    shareId: string;
+    renameLink: (name: string) => Promise<void>;
 }
 
-const RenameModal = ({ shareId, item, onClose, onDone, ...rest }: Props) => {
+const RenameModal = ({ renameLink, item, onClose, ...rest }: Props) => {
     const { createNotification } = useNotifications();
     const [name, setName] = useState(item.Name);
     const [loading, withLoading] = useLoading();
-    const { renameLink } = useShare(shareId);
     const [autofocusDone, setAutofocusDone] = useState(false);
 
     const formatName = (name: string) => {
@@ -30,7 +28,7 @@ const RenameModal = ({ shareId, item, onClose, onDone, ...rest }: Props) => {
         }
         setAutofocusDone(true);
         const [namePart] = splitExtension(item.Name);
-        if (!namePart) {
+        if (!namePart || item.Type === LinkType.FOLDER) {
             return e.target.select();
         }
         e.target.setSelectionRange(0, namePart.length);
@@ -44,11 +42,15 @@ const RenameModal = ({ shareId, item, onClose, onDone, ...rest }: Props) => {
         const formattedName = formatName(name);
         setName(formattedName);
 
-        if (!formattedName) {
-            return;
+        try {
+            await renameLink(formattedName);
+        } catch (e) {
+            if (e.name === 'ValidationError') {
+                createNotification({ text: e.message, type: 'error' });
+            }
+            throw e;
         }
 
-        await renameLink(item.LinkID, formattedName, item.ParentLinkID);
         const nameElement = (
             <span key="name" style={{ whiteSpace: 'pre' }}>
                 &quot;{formattedName}&quot;
@@ -56,14 +58,14 @@ const RenameModal = ({ shareId, item, onClose, onDone, ...rest }: Props) => {
         );
         createNotification({ text: c('Success').jt`${nameElement} renamed successfully` });
         onClose?.();
-        onDone?.();
     };
 
     const handleBlur = ({ target }: FocusEvent<HTMLInputElement>) => {
         setName(formatName(target.value));
     };
 
-    const isFolder = item.Type === ResourceType.FOLDER;
+    const isFolder = item.Type === LinkType.FOLDER;
+    const validationError = validateLinkName(name);
 
     return (
         <FormModal
@@ -72,6 +74,7 @@ const RenameModal = ({ shareId, item, onClose, onDone, ...rest }: Props) => {
             onSubmit={() => withLoading(handleSubmit())}
             title={isFolder ? c('Title').t`Rename a folder` : c('Title').t`Rename a file`}
             submit={c('Action').t`Rename`}
+            autoFocusClose={false}
             {...rest}
         >
             <Row className="p1 pl2">
@@ -85,6 +88,7 @@ const RenameModal = ({ shareId, item, onClose, onDone, ...rest }: Props) => {
                         onChange={handleChange}
                         onBlur={handleBlur}
                         onFocus={selectNamePart}
+                        error={validationError}
                         required
                     />
                 </Field>
