@@ -1,5 +1,4 @@
-import React, { useCallback } from 'react';
-import { useMainArea } from 'react-components';
+import React, { useCallback, useEffect, useRef } from 'react';
 import useFiles from '../../hooks/useFiles';
 import useOnScrollEnd from '../../hooks/useOnScrollEnd';
 import FileBrowser, { FileBrowserItem } from '../FileBrowser/FileBrowser';
@@ -10,6 +9,8 @@ import { isPreviewAvailable } from '../FilePreview/FilePreview';
 import { useDriveContent } from './DriveContentProvider';
 import EmptyFolder from '../FileBrowser/EmptyFolder';
 import { LinkMeta, LinkType } from '../../interfaces/link';
+import { useDriveCache } from '../DriveCache/DriveCacheProvider';
+import useDrive from '../../hooks/useDrive';
 
 export const getMetaForTransfer = (item: FileBrowserItem | LinkMeta): TransferMeta => {
     return {
@@ -25,11 +26,22 @@ interface Props {
 }
 
 function Drive({ activeFolder, openLink }: Props) {
-    const mainAreaRef = useMainArea();
+    const scrollAreaRef = useRef<HTMLDivElement>(null);
+    const cache = useDriveCache();
+    const { getLinkMeta } = useDrive();
     const { startFileTransfer } = useFiles();
     const { loadNextPage, fileBrowserControls, loading, contents, complete, initialized } = useDriveContent();
 
+    const { linkId, shareId } = activeFolder;
     const { clearSelections, selectedItems, toggleSelectItem, toggleAllSelected, selectRange } = fileBrowserControls;
+
+    const folderName = cache.get.linkMeta(shareId, linkId)?.Name;
+
+    useEffect(() => {
+        if (folderName === undefined) {
+            getLinkMeta(shareId, linkId);
+        }
+    }, [shareId, linkId, folderName]);
 
     const handleScrollEnd = useCallback(() => {
         // Only load on scroll after initial load from backend
@@ -39,11 +51,10 @@ function Drive({ activeFolder, openLink }: Props) {
     }, [initialized, complete, loadNextPage]);
 
     // On content change, check scroll end (does not rebind listeners)
-    useOnScrollEnd(handleScrollEnd, mainAreaRef, 0.9, [contents]);
+    useOnScrollEnd(handleScrollEnd, scrollAreaRef, 0.9, [contents]);
 
     const handleClick = async (item: FileBrowserItem) => {
         document.getSelection()?.removeAllRanges();
-        const { shareId } = activeFolder;
 
         if (item.Type === LinkType.FOLDER) {
             openLink(shareId, item.LinkID, item.Type);
@@ -62,7 +73,9 @@ function Drive({ activeFolder, openLink }: Props) {
         <EmptyFolder />
     ) : (
         <FileBrowser
-            shareId={activeFolder.shareId}
+            scrollAreaRef={scrollAreaRef}
+            caption={folderName}
+            shareId={shareId}
             loading={loading}
             contents={contents}
             selectedItems={selectedItems}

@@ -1,5 +1,5 @@
 import React from 'react';
-import { TableBody, Checkbox, TableRowBusy, useActiveBreakpoint } from 'react-components';
+import { TableBody, Checkbox, TableRowBusy, useActiveBreakpoint, TableRowSticky } from 'react-components';
 import { c } from 'ttag';
 import ItemRow from './ItemRow';
 import { LinkType } from '../../interfaces/link';
@@ -9,6 +9,7 @@ export interface FileBrowserItem {
     LinkID: string;
     Type: LinkType;
     Modified: number;
+    Trashed: number | null;
     MimeType: string;
     Size: number;
     ParentLinkID: string;
@@ -17,7 +18,9 @@ export interface FileBrowserItem {
 
 interface Props {
     loading?: boolean;
+    scrollAreaRef: React.RefObject<HTMLDivElement>;
     shareId: string;
+    caption: string;
     contents: FileBrowserItem[];
     selectedItems: FileBrowserItem[];
     isTrash?: boolean;
@@ -30,8 +33,10 @@ interface Props {
 
 const FileBrowser = ({
     loading,
+    caption,
     contents,
     shareId,
+    scrollAreaRef,
     selectedItems,
     isTrash = false,
     onToggleItemSelected,
@@ -47,11 +52,12 @@ const FileBrowser = ({
     const colSpan = 4 + Number(isDesktop) + Number(isTrash);
 
     return (
-        <div className="flex flex-item-fluid" onClick={onEmptyAreaClick}>
-            <table className="pd-fb-table">
+        <div ref={scrollAreaRef} className="flex flex-item-fluid scroll-if-needed" onClick={onEmptyAreaClick}>
+            <table className="pm-simple-table pm-simple-table--isHoverable pd-fb-table noborder border-collapse">
+                <caption className="sr-only">{caption}</caption>
                 <thead>
-                    <tr>
-                        <th>
+                    <TableRowSticky scrollAreaRef={scrollAreaRef}>
+                        <th scope="col">
                             <div key="select-all" className="flex" onClick={(e) => e.stopPropagation()}>
                                 <Checkbox
                                     readOnly
@@ -62,14 +68,18 @@ const FileBrowser = ({
                                 />
                             </div>
                         </th>
-                        <th>
-                            <div className="pd-fb-table-heading-name ml0-5">{c('TableHeader').t`Name`}</div>
+                        <th scope="col">
+                            <div className="ellipsis">{c('TableHeader').t`Name`}</div>
                         </th>
-                        {isTrash && <th className="w25">{c('TableHeader').t`Location`}</th>}
-                        <th className={isDesktop ? 'w10' : 'w15'}>{c('TableHeader').t`Type`}</th>
-                        {isDesktop && <th className="w20">{modifiedHeader}</th>}
-                        <th className={isDesktop ? 'w10' : 'w15'}>{c('TableHeader').t`Size`}</th>
-                    </tr>
+                        {isTrash && <th scope="col" className="w25">{c('TableHeader').t`Location`}</th>}
+                        <th scope="col" className={isDesktop ? 'w10' : 'w15'}>{c('TableHeader').t`Type`}</th>
+                        {isDesktop && (
+                            <th scope="col" className="w20">
+                                {modifiedHeader}
+                            </th>
+                        )}
+                        <th scope="col" className={isDesktop ? 'w10' : 'w15'}>{c('TableHeader').t`Size`}</th>
+                    </TableRowSticky>
                 </thead>
                 <TableBody colSpan={colSpan}>
                     {contents.map((item) => (

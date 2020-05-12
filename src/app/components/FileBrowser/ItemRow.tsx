@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { TableRow, Checkbox, Time, useActiveBreakpoint } from 'react-components';
+import { TableRow, Checkbox, Time, useActiveBreakpoint, classnames } from 'react-components';
 import { c } from 'ttag';
 import humanSize from 'proton-shared/lib/helpers/humanSize';
 import { LinkType } from '../../interfaces/link';
@@ -62,12 +62,17 @@ const ItemRow = ({ item, shareId, selectedItems, onToggleSelect, onClick, onShif
             <Checkbox
                 className="increase-surface-click"
                 checked={isSelected}
-                onChange={() => onToggleSelect(item.LinkID)}
+                onChange={(e) => {
+                    if (isSelected) {
+                        e.target.blur();
+                    }
+                    onToggleSelect(item.LinkID);
+                }}
             />
         </div>,
         <div key="filename" className="flex flex-items-center flex-nowrap">
             <MimeIcon mimeType={item.Type === LinkType.FOLDER ? 'Folder' : item.MimeType} />
-            <span title={item.Name} className="pd-fb-table-row-name">
+            <span title={item.Name} className="ellipsis">
                 {item.Name}
             </span>
         </div>,
@@ -75,7 +80,7 @@ const ItemRow = ({ item, shareId, selectedItems, onToggleSelect, onClick, onShif
         isFolder ? c('Label').t`Folder` : c('Label').t`File`,
         isDesktop && (
             <Time key="dateModified" format="PPp">
-                {item.Modified}
+                {item.Trashed ?? item.Modified}
             </Time>
         ),
         item.Size ? humanSize(item.Size) : '-'
@@ -83,7 +88,7 @@ const ItemRow = ({ item, shareId, selectedItems, onToggleSelect, onClick, onShif
 
     return (
         <TableRow
-            className="pd-fb-table-row"
+            className={classnames(['cursor-pointer', isSelected && 'bg-global-highlight'])}
             onMouseDown={() => document.getSelection()?.removeAllRanges()}
             onClick={handleRowClick}
             onTouchStart={handleTouchStart}

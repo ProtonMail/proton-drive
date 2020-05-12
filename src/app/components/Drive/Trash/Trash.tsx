@@ -1,6 +1,5 @@
-import React, { useCallback } from 'react';
-
-import { useMainArea } from 'react-components';
+import React, { useCallback, useRef } from 'react';
+import { c } from 'ttag';
 
 import FileBrowser from '../../FileBrowser/FileBrowser';
 import EmptyTrash from '../../FileBrowser/EmptyTrash';
@@ -12,7 +11,7 @@ interface Props {
 }
 
 function Trash({ shareId }: Props) {
-    const mainAreaRef = useMainArea();
+    const scrollAreaRef = useRef<HTMLDivElement>(null);
     const { loadNextPage, loading, initialized, complete, contents, fileBrowserControls } = useTrashContent();
 
     const { clearSelections, selectedItems, toggleSelectItem, toggleAllSelected, selectRange } = fileBrowserControls;
@@ -25,13 +24,15 @@ function Trash({ shareId }: Props) {
     }, [initialized, complete, loadNextPage]);
 
     // On content change, check scroll end (does not rebind listeners)
-    useOnScrollEnd(handleScrollEnd, mainAreaRef, 0.9, [contents]);
+    useOnScrollEnd(handleScrollEnd, scrollAreaRef, 0.9, [contents]);
 
     return complete && !contents.length && !loading ? (
         <EmptyTrash />
     ) : (
         <FileBrowser
             isTrash
+            scrollAreaRef={scrollAreaRef}
+            caption={c('Title').t`Trash`}
             shareId={shareId}
             loading={loading}
             contents={contents}
