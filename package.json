@@ -4,7 +4,7 @@
     "description": "Proton-drive",
     "main": "index.ts",
     "scripts": {
-        "start": "proton-pack dev-server --appMode=standalone",
+        "start": "cross-var proton-pack dev-server $npm_package_config_publicPathFlag --appMode=standalone",
         "lint": "eslint src --ext .js,.ts,.tsx --cache",
         "pretty": "prettier --write  $(find src/app -type f -name '*.js' -o -name '*.ts' -o -name '*.tsx')",
         "preversion": "git update-index --no-assume-unchanged package-lock.json",
@@ -62,6 +62,7 @@
         "@typescript-eslint/eslint-plugin": "^2.3.3",
         "@typescript-eslint/parser": "^2.3.3",
         "babel-plugin-transform-class-properties": "^6.24.1",
+        "cross-var": "^1.1.0",
         "husky": "^2.3.0",
         "jest": "^25.1.0",
         "lint-staged": "^8.1.7",
