@@ -4,7 +4,7 @@
     "description": "Proton-drive",
     "main": "index.ts",
     "scripts": {
-        "start": "cross-var proton-pack dev-server $npm_package_config_publicPathFlag --appMode=standalone",
+        "start": "proton-pack dev-server --appMode=standalone",
         "lint": "eslint src --ext .js,.ts,.tsx --cache",
         "pretty": "prettier --write  $(find src/app -type f -name '*.js' -o -name '*.ts' -o -name '*.tsx')",
         "preversion": "git update-index --no-assume-unchanged package-lock.json",
