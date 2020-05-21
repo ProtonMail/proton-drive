@@ -69,7 +69,7 @@
         "prettier": "^1.17.1",
         "proton-bundler": "github:ProtonMail/proton-bundler#semver:^2.0.0",
         "proton-i18n": "github:ProtonMail/proton-i18n#semver:^1.6.12",
-        "service-worker-loader": "^4.0.0",
+        "service-worker-loader": "^4.0.2",
         "typescript": "^3.8.3"
     },
     "lint-staged": {
