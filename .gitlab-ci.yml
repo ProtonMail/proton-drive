@@ -3,13 +3,6 @@ include:
     ref: master
     file: '/_templates-ci/private-open.gitlab-ci.yaml'
 
-lint-types:
-    stage: test
-    tags:
-        - experimental
-    script:
-        - npm run check-types
-
 
 variables:
     APP_GIT: "$APP_GIT_CI"
