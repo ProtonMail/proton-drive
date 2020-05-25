@@ -2,3 +2,9 @@ include:
   - project: 'deploy-app/fe-scripts'
     ref: master
     file: '/jobs/private-open.gitlab-ci.yaml'
+
+
+deploy-atlas-dev:
+    image: gitlab.protontech.ch:4567/proton/devops/proton-atlas/shared:branch-feat-drive-app
+
+
