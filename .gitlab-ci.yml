@@ -2,28 +2,3 @@ include:
   - project: 'deploy-app/fe-scripts'
     ref: master
     file: '/jobs/private-open.gitlab-ci.yaml'
-
-
-deploy-atlas-dev:
-    image: gitlab.protontech.ch:4567/proton/devops/proton-atlas/shared:branch-feat-drive-app
-    before_script: []
-    except:
-        refs:
-            - tags
-            - schedules
-        variables:
-            - $CI_COMMIT_MESSAGE =~ /^Merge (branch|remote) 'develop/
-    services:
-      - docker:stable-dind
-    cache: {}
-    stage: deploy
-    allow_failure: true
-    interruptible: true
-    needs:
-      - job: bundle:with-prefix-path
-        artifacts: true
-    script:
-      - docker login -u gitlab-ci-token -p "$CI_JOB_TOKEN" "$CI_REGISTRY"
-      - atlas build push deploy --ignore-unsupported-app
-      # TODO: smoke test deploy by pinging https://{env}.protontech.dev/[calendar/,contacts/,...]assets/version.json
-
