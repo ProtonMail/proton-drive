@@ -65,7 +65,7 @@
         "cross-var": "^1.1.0",
         "eslint-config-airbnb-typescript": "^8.0.2",
         "eslint-config-prettier": "^6.11.0",
-        "eslint-config-proton-lint": "github:ProtonMail/proton-lint",
+        "eslint-config-proton-lint": "github:ProtonMail/proton-lint#semver:^0.0.2",
         "husky": "^2.3.0",
         "jest": "^25.1.0",
         "lint-staged": "^8.1.7",
