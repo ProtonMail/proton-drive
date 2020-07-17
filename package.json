@@ -48,6 +48,7 @@
         "react-components": "github:ProtonMail/react-components.git#master",
         "react-dom": "^16.8.6",
         "react-router-dom": "^4.3.1",
+        "react-virtualized": "^9.21.2",
         "ttag": "^1.7.14",
         "web-streams-polyfill": "^2.1.1",
         "yetch": "^1.1.0"
