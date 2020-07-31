@@ -41,6 +41,7 @@
         "abortcontroller-polyfill": "^1.3.0",
         "design-system": "github:ProtonMail/design-system.git#master",
         "mime-types": "^2.1.26",
+        "openpgp": "^4.10.7",
         "proton-pack": "github:ProtonMail/proton-pack.git#semver:^3.0.0",
         "proton-shared": "github:ProtonMail/proton-shared#master",
         "proton-version": "github:ProtonMail/proton-version#semver:^1.0.0",
