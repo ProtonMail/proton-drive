@@ -20,8 +20,7 @@
         "build:standalone": "cross-env NODE_ENV=production proton-pack compile --appMode=standalone",
         "bundle": "proton-bundler",
         "check-types": "tsc",
-        "test": "jest",
-        "postinstall": "proton-i18n post-install"
+        "test": "jest"
     },
     "repository": {
         "type": "git",
@@ -45,6 +44,7 @@
         "openpgp": "^4.10.7",
         "proton-pack": "github:ProtonMail/proton-pack.git#semver:^3.0.0",
         "proton-shared": "github:ProtonMail/proton-shared#master",
+        "proton-translations": "github:ProtonMail/proton-translations#fe-drive",
         "proton-version": "github:ProtonMail/proton-version#semver:^1.0.0",
         "react-components": "github:ProtonMail/react-components.git#master",
         "react-window": "^1.8.5",
