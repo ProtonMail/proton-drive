@@ -1,5 +1,5 @@
 import { OpenPGPKey } from 'pmcrypto';
-import { usePreventLeave, useGlobalLoader } from 'react-components';
+import { usePreventLeave, useGlobalLoader, useApi } from 'react-components';
 import { c } from 'ttag';
 import useDriveCrypto from './useDriveCrypto';
 import { LinkMeta, LinkType } from '../../interfaces/link';
@@ -31,9 +31,11 @@ import {
     createShareAsync,
     getShareMetaShortAsync,
     deleteChildrenLinksAsync,
+    deleteShareAsync,
 } from '../../utils/drive/drive';
 
 function useDrive() {
+    const api = useApi();
     const cache = useDriveCache();
     const queuedFunction = useQueuedFunction();
     const withGlobalLoader = useGlobalLoader({ text: c('Info').t`Loading folder contents` });
@@ -97,6 +99,7 @@ function useDrive() {
             debouncedRequest,
             getLinkKeys,
             getShareKeys,
+            decryptLink,
             cache,
             shareId,
             linkId,
@@ -110,7 +113,7 @@ function useDrive() {
     };
 
     const fetchNextFoldersOnlyContents = (shareId: string, linkId: string) => {
-        return fetchNextFoldersOnlyContentsAsync(debouncedRequest, getLinkKeys, cache, shareId, linkId);
+        return fetchNextFoldersOnlyContentsAsync(debouncedRequest, getLinkKeys, decryptLink, cache, shareId, linkId);
     };
 
     const getFoldersOnlyMetas = async (shareId: string, linkId: string, fetchNextPage = false) => {
@@ -125,7 +128,15 @@ function useDrive() {
     };
 
     const fetchNextFolderContents = async (shareId: string, linkId: string, sortParams = DEFAULT_SORT_PARAMS) => {
-        await fetchNextFolderContentsAsync(debouncedRequest, getLinkKeys, cache, shareId, linkId, sortParams);
+        await fetchNextFolderContentsAsync(
+            debouncedRequest,
+            getLinkKeys,
+            decryptLink,
+            cache,
+            shareId,
+            linkId,
+            sortParams
+        );
     };
 
     const fetchAllFolderPages = async (shareId: string, linkId: string) => {
@@ -159,7 +170,17 @@ function useDrive() {
         newName: string,
         type: LinkType
     ) => {
-        await renameLinkAsync(debouncedRequest, getLinkKeys, getLinkMeta, shareId, linkId, parentLinkID, newName, type);
+        await renameLinkAsync(
+            debouncedRequest,
+            getLinkKeys,
+            getLinkMeta,
+            getPrimaryAddressKey,
+            shareId,
+            linkId,
+            parentLinkID,
+            newName,
+            type
+        );
     };
 
     const createNewFolder = queuedFunction(
@@ -232,6 +253,10 @@ function useDrive() {
         );
     };
 
+    const deleteShare = async (shareId: string) => {
+        return deleteShareAsync(api, shareId);
+    };
+
     return {
         initDrive,
         decryptLink,
@@ -248,6 +273,7 @@ function useDrive() {
         fetchAllFolderPagesWithLoader,
         decryptLinkPassphrase,
         createShare,
+        deleteShare,
         moveLink,
         moveLinks,
         deleteChildrenLinks,

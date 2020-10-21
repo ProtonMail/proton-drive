@@ -6,9 +6,9 @@ import { srpAuth } from 'proton-shared/lib/srp';
 import { base64StringToUint8Array } from 'proton-shared/lib/helpers/encoding';
 import { decryptUnsigned, getStreamMessage } from 'proton-shared/lib/keys/driveKeys';
 
-import { queryInitSRPHandshake, queryGetURLPayload } from '../../api/sharing';
+import { queryInitSRPHandshake, queryGetSharedLinkPayload } from '../../api/sharing';
 import { getDecryptedSessionKey } from '../../utils/drive/driveCrypto';
-import { InitHandshake, SharedLinkPayload } from '../../interfaces/sharing';
+import { InitHandshake, SharedLinkPayload, SharedLinkInfo } from '../../interfaces/sharing';
 import { DriveFileBlock } from '../../interfaces/file';
 import { TransferMeta } from '../../interfaces/transfer';
 import { StreamTransformer } from '../../components/downloads/download';
@@ -18,7 +18,7 @@ function usePublicSharing() {
     const api = useApi();
     const { addToDownloadQueue } = useDownloadProvider();
 
-    const getSharedLinkPayload = async (token: string, password: string) => {
+    const getSharedLinkPayload = async (token: string, password: string): Promise<SharedLinkInfo> => {
         const initHandshake = async (token: string) => {
             return api<InitHandshake>(queryInitSRPHandshake(token));
         };
@@ -35,7 +35,7 @@ function usePublicSharing() {
                 Salt: UrlPasswordSalt,
                 SRPSession,
             },
-            config: queryGetURLPayload(token),
+            config: queryGetSharedLinkPayload(token),
         });
 
         const Blocks: DriveFileBlock[] = Payload.Blocks.map((URL: string, Index: number) => {

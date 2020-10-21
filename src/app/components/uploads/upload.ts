@@ -74,7 +74,6 @@ export async function upload(
 
         let lastLoaded = 0;
         let total = 0;
-
         xhr.upload.onprogress = (e) => {
             total = e.total;
             onProgress((e.loaded - lastLoaded) / total, e.loaded === total);
@@ -142,6 +141,14 @@ export function initUpload(file: File, { requestUpload, transform, onProgress, f
         return index;
     };
 
+    const resetBlockUploadProgress = (block: EncryptedBlock) => {
+        if (onProgress) {
+            const progressToRevert = block.progress ?? 0;
+            delete block.progress;
+            onProgress(-progressToRevert);
+        }
+    };
+
     const resetUploadProgress = (uploadingBlocks: Map<number, EncryptedBlock>) => {
         if (onProgress && uploadingBlocks.size) {
             let progressToRevert = 0;
@@ -205,25 +212,19 @@ export function initUpload(file: File, { requestUpload, transform, onProgress, f
 
         const blockUploaders: (() => Promise<void>)[] = [];
 
-        uploadingBlocks.forEach((block) => {
+        const getBlockUploader = (block: EncryptedBlock, numRetries = 0) => async () => {
             const { index, originalSize, chunk, meta: blockMeta } = block;
+            const { encryptedData } = await chunk;
 
             if (!blockMeta) {
                 throw new Error(`Block #${index} URL could not be resolved for upload ${id}`);
             }
 
             const {
-                uploadLink: { URL, Token },
-                hash,
+                uploadLink: { URL },
             } = blockMeta;
 
-            blockTokens.set(index, {
-                Hash: hash,
-                Token,
-            });
-
-            const blockUploader = async () => {
-                const { encryptedData } = await chunk;
+            try {
                 await upload(
                     id,
                     URL,
@@ -239,9 +240,35 @@ export function initUpload(file: File, { requestUpload, transform, onProgress, f
                     },
                     abortController.signal
                 );
-            };
+            } catch (e) {
+                if (!isTransferCancelError(e) && numRetries < 3) {
+                    console.error(`Failed block #${index} upload for ${id}. Retry num: ${numRetries}`);
+                    resetBlockUploadProgress(block);
+                    blockUploaders.push(getBlockUploader(block, numRetries + 1));
+                } else {
+                    throw e;
+                }
+            }
+        };
 
-            blockUploaders.push(blockUploader);
+        uploadingBlocks.forEach((block) => {
+            const { index, meta: blockMeta } = block;
+
+            if (!blockMeta) {
+                throw new Error(`Block #${index} Token could not be resolved for upload ${id}`);
+            }
+
+            const {
+                uploadLink: { Token },
+                hash,
+            } = blockMeta;
+
+            blockTokens.set(index, {
+                Hash: hash,
+                Token,
+            });
+
+            blockUploaders.push(getBlockUploader(block));
         });
 
         await runInQueue(blockUploaders, MAX_THREADS_PER_UPLOAD).catch((e) => {

@@ -6,7 +6,7 @@ import { lookup } from 'mime-types';
 import {
     generateNodeKeys,
     generateContentKeys,
-    encryptUnsigned,
+    encryptName,
     generateLookupHash,
     getStreamMessage,
 } from 'proton-shared/lib/keys/driveKeys';
@@ -188,10 +188,7 @@ function useFiles() {
                     ? await generateNameHash()
                     : await findAvailableName(shareId, ParentLinkID, file.name);
 
-                const Name = await encryptUnsigned({
-                    message: filename,
-                    publicKey: parentKeys.privateKey.toPublic(),
-                });
+                const Name = await encryptName(filename, parentKeys.privateKey.toPublic(), addressKeyInfo.privateKey);
 
                 const MIMEType = lookup(filename) || 'application/octet-stream';
 
@@ -378,7 +375,7 @@ function useFiles() {
         async (
             shareId: string,
             ParentLinkID: string,
-            files: FileList | File[] | { path: string[]; file?: File }[],
+            files: FileList | { path: string[]; file?: File }[],
             filesOnly = false
         ) => {
             const { result, total } = await checkHasEnoughSpace(files);
@@ -396,13 +393,12 @@ function useFiles() {
             for (let i = 0; i < files.length; i++) {
                 const entry = files[i];
 
-                if (!filesOnly && !(await isFile(entry))) {
-                    return;
-                }
+                const file = 'path' in entry ? entry.file : entry;
 
-                isFile(entry)
+                (file ? isFile(file) : Promise.resolve(false))
                     .then((isEntryFile) => {
-                        if (!isEntryFile) {
+                        // MacOS has bug, where you can select folders when uploading files in some cases
+                        if (filesOnly && !isEntryFile) {
                             return;
                         }
 

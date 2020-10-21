@@ -22,7 +22,7 @@ export const queryShareMeta = (shareID: string) => ({
 export const queryRenameLink = (
     shareID: string,
     linkID: string,
-    data: { Name: string; MIMEType: string; Hash: string }
+    data: { Name: string; MIMEType: string; Hash: string; SignatureAddress: string }
 ) => ({
     method: `put`,
     url: `drive/shares/${shareID}/links/${linkID}/rename`,
@@ -53,4 +53,9 @@ export const queryEvents = (shareID: string, eventID: string) => ({
 export const queryLatestEvents = (shareID: string) => ({
     url: `drive/shares/${shareID}/events/latest`,
     method: 'get',
+});
+
+export const queryDeleteShare = (shareID: string) => ({
+    url: `drive/shares/${shareID}`,
+    method: 'delete',
 });
