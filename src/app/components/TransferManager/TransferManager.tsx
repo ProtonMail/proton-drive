@@ -3,6 +3,7 @@ import { useToggle, classnames, useElementRect } from 'react-components';
 import { FixedSizeList, ListChildComponentProps } from 'react-window';
 import { buffer } from 'proton-shared/lib/helpers/function';
 import { c } from 'ttag';
+import { FEATURE_FLAGS } from 'proton-shared/lib/constants';
 import { useDownloadProvider } from '../downloads/DownloadProvider';
 import { useUploadProvider } from '../uploads/UploadProvider';
 import Header from './Header';
@@ -72,6 +73,20 @@ function TransferManager() {
     const { uploads, getUploadsProgresses, clearUploads } = useUploadProvider();
     const [statsHistory, setStatsHistory] = React.useState<TransfersStats[]>([]);
     const { openConfirmModal } = useConfirm();
+
+    const clearAllTransfers = useCallback(() => {
+        clearDownloads();
+        clearUploads();
+    }, [clearDownloads, clearUploads]);
+
+    useEffect(() => {
+        if (FEATURE_FLAGS.includes('drive-sprint-25')) {
+            document.addEventListener('unload', clearAllTransfers);
+            return () => {
+                document.removeEventListener('unload', clearAllTransfers);
+            };
+        }
+    }, [clearAllTransfers]);
 
     const getTransfer = useCallback(
         (id: string) => downloads.find((download) => download.id === id) || uploads.find((upload) => upload.id === id),
@@ -151,11 +166,6 @@ function TransferManager() {
     if (!latestStats || downloads.length + uploads.length === 0) {
         return null;
     }
-
-    const clearAllTransfers = () => {
-        clearDownloads();
-        clearUploads();
-    };
 
     const handleCloseClick = () => {
         if (allTransfersFinished) {

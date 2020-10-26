@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useRef, useEffect } from 'react';
+import React, { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react';
+import { FEATURE_FLAGS } from 'proton-shared/lib/constants';
 import { initUpload, UploadCallbacks, UploadControls } from './upload';
 import {
     TransferState,
@@ -14,6 +15,7 @@ import {
     isTransferFailed,
     isTransferCancelError,
     isTransferPaused,
+    isTransferFinished,
 } from '../../utils/transfer';
 
 type UploadStateUpdater = TransferState | ((upload: Upload) => TransferState);
@@ -73,11 +75,17 @@ export const UploadProvider = ({ children }: UserProviderProps) => {
         setUploads(uploadsRef.current);
     };
 
-    const clearUploads = () => {
-        // TODO: cancel pending uploads when implementing reject
+    const clearUploads = useCallback(() => {
+        if (FEATURE_FLAGS.includes('drive-sprint-25')) {
+            uploadsRef.current.forEach((upload) => {
+                if (!isTransferFinished(upload)) {
+                    controls.current[upload.id].cancel();
+                }
+            });
+        }
         uploadsRef.current = [];
         setUploads(uploadsRef.current);
-    };
+    }, []);
 
     const updateUploadState = (id: string, nextState: UploadStateUpdater, data: Partial<Upload> = {}) => {
         const currentUpload = uploadsRef.current.find((upload) => upload.id === id);
