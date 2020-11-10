@@ -9,17 +9,16 @@ import { useUploadProvider } from '../uploads/UploadProvider';
 import Header from './Header';
 import Transfer from './Transfer';
 import { TransferState, Download, Upload } from '../../interfaces/transfer';
-import { isTransferFinished, isTransferProgress } from '../../utils/transfer';
-import { TransfersStats, TransferType, TransferStats } from './interfaces';
+import { isTransferFinished } from '../../utils/transfer';
+import { TransfersStats, TransferType } from './interfaces';
 import useConfirm from '../../hooks/util/useConfirm';
+import useStatsHistory from '../../hooks/drive/useStatsHistory';
 
 interface TransferListEntry<T extends TransferType> {
     transfer: T extends TransferType.Download ? Download : Upload;
     type: T;
 }
 
-const PROGRESS_UPDATE_INTERVAL = 500;
-const SPEED_SNAPSHOTS = 10; // How many snapshots should the speed be average of
 const ROW_HEIGHT_PX = 70;
 
 enum TRANSFER_GROUP {
@@ -69,10 +68,16 @@ function TransferManager() {
     const containerRef = useRef<HTMLDivElement>(null);
     const rect = useElementRect(containerRef, buffer);
     const { state: minimized, toggle: toggleMinimized } = useToggle();
+    const { openConfirmModal } = useConfirm();
     const { downloads, getDownloadsProgresses, clearDownloads } = useDownloadProvider();
     const { uploads, getUploadsProgresses, clearUploads } = useUploadProvider();
-    const [statsHistory, setStatsHistory] = React.useState<TransfersStats[]>([]);
-    const { openConfirmModal } = useConfirm();
+
+    const transfers = useMemo(() => [...downloads, ...uploads], [downloads, uploads]);
+    const allTransfersFinished = useMemo(() => transfers.every(isTransferFinished), [transfers]);
+    const getTransferProgresses = useCallback(() => {
+        return { ...getUploadsProgresses(), ...getDownloadsProgresses() };
+    }, [getUploadsProgresses, getDownloadsProgresses]);
+    const statsHistory = useStatsHistory(transfers, getTransferProgresses);
 
     const clearAllTransfers = useCallback(() => {
         clearDownloads();
@@ -81,59 +86,12 @@ function TransferManager() {
 
     useEffect(() => {
         if (FEATURE_FLAGS.includes('drive-sprint-25')) {
-            document.addEventListener('unload', clearAllTransfers);
+            window.addEventListener('unload', clearAllTransfers);
             return () => {
-                document.removeEventListener('unload', clearAllTransfers);
+                window.removeEventListener('unload', clearAllTransfers);
             };
         }
     }, [clearAllTransfers]);
-
-    const getTransfer = useCallback(
-        (id: string) => downloads.find((download) => download.id === id) || uploads.find((upload) => upload.id === id),
-        [downloads, uploads]
-    );
-
-    const updateStats = () => {
-        const timestamp = new Date();
-        const progresses = { ...getUploadsProgresses(), ...getDownloadsProgresses() };
-
-        setStatsHistory((prev) => {
-            const lastStats = (id: string) => prev[0]?.stats[id] || {};
-            const stats = Object.entries(progresses).reduce(
-                (stats, [id, progress]) => ({
-                    ...stats,
-                    [id]: {
-                        // get speed snapshot based on bytes downloaded since last update
-                        speed: isTransferProgress(lastStats(id))
-                            ? (progresses[id] - lastStats(id).progress) * (1000 / PROGRESS_UPDATE_INTERVAL)
-                            : 0,
-                        state: getTransfer(id)?.state ?? TransferState.Error,
-                        progress,
-                    },
-                }),
-                {} as { [id: string]: TransferStats }
-            );
-
-            return [{ stats, timestamp }, ...prev.slice(0, SPEED_SNAPSHOTS - 1)];
-        });
-    };
-
-    useEffect(() => {
-        updateStats();
-
-        const uploading = uploads.filter(isTransferProgress);
-        const downloading = downloads.filter(isTransferProgress);
-
-        if (!uploading.length && !downloading.length) {
-            return;
-        }
-
-        const int = setInterval(updateStats, PROGRESS_UPDATE_INTERVAL);
-
-        return () => {
-            clearInterval(int);
-        };
-    }, [uploads, downloads]);
 
     const latestStats = statsHistory[0];
 
@@ -160,9 +118,6 @@ function TransferManager() {
         [downloadEntries, uploadEntries]
     );
 
-    const transfers = useMemo(() => [...downloads, ...uploads], [downloads, uploads]);
-    const allTransfersFinished = useMemo(() => transfers.every(isTransferFinished), [transfers]);
-
     if (!latestStats || downloads.length + uploads.length === 0) {
         return null;
     }
@@ -171,12 +126,12 @@ function TransferManager() {
         if (allTransfersFinished) {
             clearAllTransfers();
         } else {
-            openConfirmModal(
-                c('Title').t`Cancel all active transfers`,
-                c('Action').t`Confirm`,
-                c('Info').t`Closing transfer manager will cancel all active transfers, are you sure?`,
-                clearAllTransfers
-            );
+            openConfirmModal({
+                title: c('Title').t`Cancel all active transfers`,
+                confirm: c('Action').t`Confirm`,
+                message: c('Info').t`Closing transfer manager will cancel all active transfers, are you sure?`,
+                onConfirm: clearAllTransfers,
+            });
         }
     };
 

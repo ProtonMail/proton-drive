@@ -16,6 +16,7 @@ import humanSize from 'proton-shared/lib/helpers/humanSize';
 import { splitExtension } from 'proton-shared/lib/helpers/file';
 import { noop } from 'proton-shared/lib/helpers/function';
 import { uint8ArrayToBase64String } from 'proton-shared/lib/helpers/encoding';
+import { FEATURE_FLAGS } from 'proton-shared/lib/constants';
 import {
     DriveFileRevisionResult,
     CreateFileResult,
@@ -42,12 +43,14 @@ import { ValidationError, validateLinkName } from '../../utils/validation';
 import useDriveCrypto from './useDriveCrypto';
 import useDrive from './useDrive';
 import useDebouncedRequest from '../util/useDebouncedRequest';
-import { FILE_CHUNK_SIZE } from '../../constants';
+import { FILE_CHUNK_SIZE, MAX_SAFE_UPLOADING_FILE_COUNT } from '../../constants';
 import useQueuedFunction from '../util/useQueuedFunction';
 import { useDriveCache } from '../../components/DriveCache/DriveCacheProvider';
-import { isFile } from '../../utils/file';
+import { countFilesToUpload, isFile } from '../../utils/file';
 import { getMetaForTransfer, isTransferCancelError } from '../../utils/transfer';
 import useEvents from './useEvents';
+import { mimeTypeFromFile } from '../../utils/MimeTypeParser/MimeTypeParser';
+import useConfirm from '../util/useConfirm';
 
 const HASH_CHECK_AMOUNT = 10;
 
@@ -63,9 +66,10 @@ function useFiles() {
     const { getLinkMeta, getLinkKeys, fetchAllFolderPages, createNewFolder } = useDrive();
     const events = useEvents();
     const { addToDownloadQueue, addFolderToDownloadQueue } = useDownloadProvider();
-    const { addToUploadQueue, getUploadsImmediate, getUploadsProgresses } = useUploadProvider();
+    const { addToUploadQueue, getUploadsImmediate, getUploadsProgresses, getAbortController } = useUploadProvider();
     const { preventLeave } = usePreventLeave();
     const { call } = useEventManager();
+    const { openConfirmModal } = useConfirm();
 
     const findAvailableName = queuedFunction(
         'findAvailableName',
@@ -129,18 +133,23 @@ function useFiles() {
         shareId: string,
         ParentLinkID: string,
         folderName: string,
-        { checkNameAvailability = true }: { checkNameAvailability?: boolean } = {}
+        { checkNameAvailability = true, signal }: { checkNameAvailability?: boolean; signal?: AbortSignal } = {}
     ) => {
         const lowercaseName = folderName.toLowerCase();
 
         return queuedFunction(`upload_empty_folder:${lowercaseName}`, async () => {
             let adjustedFolderName = folderName;
 
-            if (checkNameAvailability) {
+            if (checkNameAvailability && !signal?.aborted) {
                 const checkResult = await findAvailableName(shareId, ParentLinkID, adjustedFolderName);
 
                 adjustedFolderName = checkResult.filename;
             }
+
+            if (signal?.aborted) {
+                throw new TransferCancel({ message: `Upload folder "${folderName}" aborted in ${ParentLinkID}` });
+            }
+
             return createNewFolder(shareId, ParentLinkID, adjustedFolderName);
         })();
     };
@@ -193,7 +202,7 @@ function useFiles() {
                 }
 
                 if (canceled) {
-                    throw new TransferCancel(file.name);
+                    throw new TransferCancel({ message: `Transfer canceled for file "${file.name}"` });
                 }
 
                 const { filename, hash: Hash } = noNameCheck
@@ -202,10 +211,14 @@ function useFiles() {
 
                 const Name = await encryptName(filename, parentKeys.privateKey.toPublic(), addressKeyInfo.privateKey);
 
-                const MIMEType = lookup(filename) || 'application/octet-stream';
+                const fileMimeType = FEATURE_FLAGS.includes('drive-sprint-25')
+                    ? await mimeTypeFromFile(file)
+                    : undefined;
+
+                const MIMEType = fileMimeType || lookup(filename) || 'application/octet-stream';
 
                 if (canceled) {
-                    throw new TransferCancel(filename);
+                    throw new TransferCancel({ message: `Transfer canceled for file "${filename}"` });
                 }
 
                 const { File } = await debouncedRequest<CreateFileResult>(
@@ -349,7 +362,7 @@ function useFiles() {
                         await deleteChildrenLinks(shareId, ParentLinkID, [File.ID]);
                     } catch (err) {
                         if (!isTransferCancelError(err)) {
-                            throw err;
+                            console.error(err);
                         }
                     }
                 },
@@ -401,8 +414,9 @@ function useFiles() {
             files: FileList | { path: string[]; file?: File }[],
             filesOnly = false
         ) => {
+            const { signal } = getAbortController();
             const { result, total } = await checkHasEnoughSpace(files);
-            if (!result) {
+            if (!result && !signal.aborted) {
                 const formattedRemaining = humanSize(total);
                 createNotification({
                     text: c('Notification').t`Not enough space to upload ${formattedRemaining}`,
@@ -411,12 +425,49 @@ function useFiles() {
                 throw new Error('Insufficient storage left');
             }
 
+            const fileCount = countFilesToUpload(files);
+
+            if (fileCount >= MAX_SAFE_UPLOADING_FILE_COUNT) {
+                await new Promise((resolve, reject) => {
+                    openConfirmModal({
+                        canUndo: true,
+                        title: c('Title').t`Warning`,
+                        confirm: c('Action').t`Continue`,
+                        message: c('Info').t`Uploading hundreds of files at once may have a performance impact.`,
+                        onConfirm: resolve,
+                        onCancel: () =>
+                            reject(new TransferCancel({ message: `Upload of ${fileCount} files was canceled` })),
+                    });
+                });
+            }
+
             const folderPromises = new Map<string, ReturnType<typeof createNewFolder>>();
 
             for (let i = 0; i < files.length; i++) {
                 const entry = files[i];
 
                 const file = 'path' in entry ? entry.file : entry;
+
+                if (signal.aborted) {
+                    return;
+                }
+
+                const uploadFile = (parentLinkID: string | Promise<string>, file: File, noNameCheck?: boolean) => {
+                    if (!signal.aborted) {
+                        preventLeave(uploadDriveFile(shareId, parentLinkID, file, noNameCheck)).catch((err) => {
+                            if (!isTransferCancelError(err)) {
+                                console.error(err);
+                            }
+                        });
+                    }
+                };
+
+                const createFolder = (ParentLinkID: string, folderName: string, checkNameAvailability = false) => {
+                    return uploadEmptyFolder(shareId, ParentLinkID, folderName, {
+                        checkNameAvailability,
+                        signal,
+                    });
+                };
 
                 (file ? isFile(file) : Promise.resolve(false))
                     .then((isEntryFile) => {
@@ -427,7 +478,7 @@ function useFiles() {
 
                         setTimeout(() => {
                             if (!('path' in entry)) {
-                                preventLeave(uploadDriveFile(shareId, ParentLinkID, entry)).catch(console.error);
+                                uploadFile(ParentLinkID, entry);
                                 return;
                             }
 
@@ -440,51 +491,46 @@ function useFiles() {
                                 const parent = folders.slice(0, -1).join('/');
                                 const path = parent ? folders.join('/') : folder;
 
-                                if (!folderPromises.get(path)) {
+                                if (!folderPromises.has(path)) {
                                     const parentFolderPromise = folderPromises.get(parent);
 
                                     // Wait for parent folders to be created first
-                                    const promise = parentFolderPromise
-                                        ? parentFolderPromise.then(({ Folder }) =>
-                                              uploadEmptyFolder(shareId, Folder.ID, folder, {
-                                                  checkNameAvailability: false,
-                                              })
-                                          )
-                                        : // If root folder in a tree, it's name must be checked, all other folders are new ones
-                                          uploadEmptyFolder(shareId, ParentLinkID, folder, {
-                                              checkNameAvailability: !parent,
-                                          });
+                                    // If root folder's in tree, it's name must be checked, all other folders are new ones
+                                    const promise = (parentFolderPromise
+                                        ? parentFolderPromise.then(({ Folder }) => createFolder(Folder.ID, folder))
+                                        : createFolder(ParentLinkID, folder, !parent)
+                                    ).then(async (args) => {
+                                        await events.call(shareId);
+                                        return args;
+                                    });
 
                                     // Fetch events to get keys required for encryption in the new folder
-                                    folderPromises.set(
-                                        path,
-                                        promise.then(async (args) => {
-                                            await events.call(shareId);
-                                            return args;
-                                        })
-                                    );
+                                    folderPromises.set(path, promise);
                                 }
 
-                                const folderPromise = folderPromises.get(path);
+                                const folderPromise = folderPromises.get(path)?.then(({ Folder: { ID } }) => ID);
 
-                                if (!file || !folderPromise) {
-                                    return; // No file to upload
+                                if (file && folderPromise) {
+                                    const promise = folderPromise;
+                                    uploadFile(promise, file, true);
                                 }
 
-                                preventLeave(
-                                    uploadDriveFile(
-                                        shareId,
-                                        folderPromise.then(({ Folder: { ID } }) => ID),
-                                        file,
-                                        true
-                                    )
-                                ).catch(console.error);
+                                // Log unhandled exceptions
+                                folderPromise?.catch((err) => {
+                                    if (!isTransferCancelError(err)) {
+                                        console.error(err);
+                                    }
+                                });
                             } else if (file) {
-                                preventLeave(uploadDriveFile(shareId, ParentLinkID, file)).catch(console.error);
+                                uploadFile(ParentLinkID, file);
                             }
                         }, 0);
                     })
-                    .catch(console.error);
+                    .catch((err) => {
+                        if (!isTransferCancelError(err)) {
+                            console.error(err);
+                        }
+                    });
             }
         }
     );

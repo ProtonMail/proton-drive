@@ -1,6 +1,6 @@
 import { getRandomString } from 'proton-shared/lib/helpers/string';
 import React, { useEffect, useState } from 'react';
-import { DialogModal, useNotifications } from 'react-components';
+import { DialogModal, useLoading, useNotifications } from 'react-components';
 import { c } from 'ttag';
 import useDrive from '../../hooks/drive/useDrive';
 import useEvents from '../../hooks/drive/useEvents';
@@ -30,10 +30,10 @@ enum SharingModalState {
 
 function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, ...rest }: Props) {
     const [modalState, setModalState] = useState(SharingModalState.Loading);
+    const [deleting, withDeleting] = useLoading(false);
+    const [savingPassword, withSavingPassword] = useLoading(false);
     const [includePassword, setIncludePassword] = useState(false);
-    const [deleting, setDeleting] = useState(false);
     const [shareUrlInfo, setShareUrlInfo] = useState<{ ShareURL: ShareURL; keyInfo: SharedURLSessionKeyPayload }>();
-    const [savingPassword, setSavingPassword] = useState(false);
     const [error, setError] = useState(false);
     const { getShareMetaShort, deleteShare } = useDrive();
     const {
@@ -48,6 +48,11 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
     const { openConfirmModal } = useConfirm();
 
     useEffect(() => {
+        // If token already loaded, don't reload it
+        if (shareUrlInfo?.ShareURL.ShareID) {
+            return;
+        }
+
         const generatePassword = (): string => {
             const password = getRandomString(12);
 
@@ -81,7 +86,7 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
             .finally(() => {
                 setModalState(SharingModalState.GeneratedLink);
             });
-    }, [shareId, item.LinkID, item.SharedURLShareID]);
+    }, [shareId, item.LinkID, item.SharedURLShareID, shareUrlInfo?.ShareURL.ShareID]);
 
     const handleSavePassword = async (password: string) => {
         if (!shareUrlInfo) {
@@ -89,36 +94,34 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
         }
 
         const updatePassword = async () => {
-            const res = await updateSharedLinkPassword(
-                shareUrlInfo.ShareURL.ShareID,
-                shareUrlInfo.ShareURL.Token,
-                password,
-                shareUrlInfo.keyInfo
-            );
-            await events.call(shareId);
-            return res;
+            try {
+                const res = await updateSharedLinkPassword(
+                    shareUrlInfo.ShareURL.ShareID,
+                    shareUrlInfo.ShareURL.Token,
+                    password,
+                    shareUrlInfo.keyInfo
+                );
+                await events.call(shareId);
+                return res;
+            } catch (e) {
+                if (e.name === 'ValidationError') {
+                    createNotification({ text: e.message, type: 'error' });
+                }
+                throw e;
+            }
         };
 
-        try {
-            setSavingPassword(true);
-            const updatedFields = await updatePassword();
-            setShareUrlInfo({
-                ...shareUrlInfo,
-                ShareURL: {
-                    ...shareUrlInfo.ShareURL,
-                    ...updatedFields,
-                },
-            });
-            setIncludePassword(false);
-            setModalState(SharingModalState.GeneratedLink);
-        } catch (e) {
-            if (e.name === 'ValidationError') {
-                createNotification({ text: e.message, type: 'error' });
-            }
-            throw e;
-        } finally {
-            setSavingPassword(false);
-        }
+        const updatedFields = await withSavingPassword(updatePassword());
+        createNotification({ text: c('Notification').t`Password has been changed successfully.` });
+        setShareUrlInfo({
+            ...shareUrlInfo,
+            ShareURL: {
+                ...shareUrlInfo.ShareURL,
+                ...updatedFields,
+            },
+        });
+        setIncludePassword(false);
+        setModalState(SharingModalState.GeneratedLink);
     };
 
     const handleToggleIncludePassword = () => {
@@ -131,25 +134,20 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
         }
 
         const deleteLink = async () => {
-            try {
-                const { Token, ShareID } = shareUrlInfo.ShareURL;
-                setDeleting(true);
-                await deleteSharedLink(ShareID, Token);
-                await deleteShare(ShareID);
-                await events.call(shareId);
-                createNotification({ text: c('Notification').t`Secure link has been deleted` });
-                onClose?.();
-            } finally {
-                setDeleting(false);
-            }
+            const { Token, ShareID } = shareUrlInfo.ShareURL;
+            await deleteSharedLink(ShareID, Token);
+            await deleteShare(ShareID);
+            await events.call(shareId);
+            createNotification({ text: c('Notification').t`Secure link has been deleted` });
+            onClose?.();
         };
 
-        openConfirmModal(
-            c('Title').t`Delete secure link`,
-            c('Action').t`Delete`,
-            c('Info').t`Are you sure you want to delete the secure link?`,
-            deleteLink
-        );
+        openConfirmModal({
+            title: c('Title').t`Delete secure link`,
+            confirm: c('Action').t`Delete`,
+            message: c('Info').t`Are you sure you want to delete the secure link?`,
+            onConfirm: () => withDeleting(deleteLink()),
+        });
     };
 
     const loading = modalState === SharingModalState.Loading;

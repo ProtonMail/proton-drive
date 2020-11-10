@@ -24,6 +24,8 @@ export const MIN_SHARED_URL_PASSWORD_LENGTH = 8;
 export const DEFAULT_SHARE_EXPIRATION_DAYS = 90;
 export const DEFAULT_SHARE_MAX_ACCESSES = 10000;
 
+export const MAX_SAFE_UPLOADING_FILE_COUNT = 500;
+
 export const CUSTOM_DATA_FORMAT = 'pd-custom';
 
 export enum LinkURLType {
@@ -49,6 +51,7 @@ export const fileDescriptions: { [type: string]: string } = {
     'application/x-bzip': 'BZip archive',
     'application/x-bzip2': 'BZip2 archive',
     'application/x-csh': 'C-Shell script',
+    'text/x-csh': 'C-Shell script',
     'text/css': 'Cascading Style Sheets (CSS)',
     'text/csv': 'Comma-separated values (CSV)',
     'application/msword': 'Microsoft Word',
@@ -59,6 +62,7 @@ export const fileDescriptions: { [type: string]: string } = {
     'image/gif': 'Graphics Interchange Format (GIF)',
     'text/html': 'HyperText Markup Language (HTML)',
     'image/vnd.microsoft.icon': 'Icon format',
+    'image/x-icon': 'Icon format',
     'text/calendar': 'iCalendar format',
     'application/java-archive': 'Java Archive (JAR)',
     'image/jpeg': 'JPEG images',
@@ -80,6 +84,7 @@ export const fileDescriptions: { [type: string]: string } = {
     'audio/opus': 'Opus audio',
     'font/otf': 'OpenType font',
     'image/png': 'Portable Network Graphics',
+    'image/apng': 'Animated Portable Network Graphics',
     'application/pdf': 'Adobe Portable Document Format (PDF)',
     'application/x-httpd-php': 'Hypertext Preprocessor (Personal Home Page)',
     'application/vnd.ms-powerpoint': 'Microsoft PowerPoint',
@@ -89,6 +94,7 @@ export const fileDescriptions: { [type: string]: string } = {
     'application/x-sh': 'Bourne shell script',
     'image/svg+xml': 'Scalable Vector Graphics(SVG)',
     'application/x-shockwave-flash': 'Small web format (SWF)',
+    'video/x-flv': 'Flash Video',
     'application/x-tar': 'Tape Archive (TAR)',
     'image/tiff': 'Tagged Image File Format (TIFF)',
     'video/mp2t': 'MPEG transport stream',

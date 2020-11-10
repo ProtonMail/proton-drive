@@ -8,6 +8,7 @@ import dragdropImageSvgDark from 'design-system/assets/img/pd-images/drag-and-dr
 
 import useFiles from '../../../hooks/drive/useFiles';
 import { useDriveActiveFolder } from '../../Drive/DriveFolderProvider';
+import { isTransferCancelError } from '../../../utils/transfer';
 
 interface UploadDragDropProps {
     children: ReactNode;
@@ -69,7 +70,7 @@ const UploadDragDrop = ({ children, className, disabled }: UploadDragDropProps) 
 
                     filesToUpload.push({ path: newPath });
 
-                    // Iterates over folders recursively and puts them into fileToUpload list
+                    // Iterates over folders recursively and puts them into filesToUpload list
                     const getEntries = async () => {
                         const promises: Promise<any>[] = [];
 
@@ -118,7 +119,11 @@ const UploadDragDrop = ({ children, className, disabled }: UploadDragDropProps) 
                 console.error(errors);
             }
 
-            uploadDriveFiles(folder.shareId, folder.linkId, filesToUpload).catch(console.error);
+            uploadDriveFiles(folder.shareId, folder.linkId, filesToUpload).catch((err) => {
+                if (!isTransferCancelError(err)) {
+                    console.error(err);
+                }
+            });
         },
         [overlayIsVisible]
     );
