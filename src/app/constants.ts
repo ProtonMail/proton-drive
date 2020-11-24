@@ -40,6 +40,14 @@ export enum EVENT_TYPES {
     UPDATE_METADATA = 3,
 }
 
+export enum EXPIRATION_DAYS {
+    ONE = 1,
+    FIFTEEN = 15,
+    THIRTY = 30,
+    SIXTY = 60,
+    NINETY = 90,
+}
+
 export const fileDescriptions: { [type: string]: string } = {
     'audio/aac': 'AAC audio',
     'application/x-abiword': 'AbiWord document',
@@ -119,4 +127,5 @@ export const fileDescriptions: { [type: string]: string } = {
     'video/3gpp2': '3GPP2 audio/video container',
     'audio/3gpp2': '3GPP2 audio/video container',
     'application/x-7z-compressed': '7-zip archive',
+    'text/x-python': 'Python',
 };

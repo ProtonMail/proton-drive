@@ -3,7 +3,8 @@ import { FormModal, Input, Row, Label, Field, useLoading, useNotifications } fro
 import { c } from 'ttag';
 import { splitExtension } from 'proton-shared/lib/helpers/file';
 import { LinkType } from '../interfaces/link';
-import { validateLinkNameField, formatLinkName } from '../utils/validation';
+import { validateLinkNameField } from '../utils/validation';
+import { formatLinkName } from '../utils/link';
 import useDrive from '../hooks/drive/useDrive';
 import { DriveFolder } from './Drive/DriveFolderProvider';
 import { MAX_NAME_LENGTH } from '../constants';
@@ -49,7 +50,7 @@ const RenameModal = ({ activeFolder, item, onClose, ...rest }: Props) => {
         setName(formattedName);
 
         try {
-            await renameLink(activeFolder.shareId, item.LinkID, item.ParentLinkID, formattedName, item.Type);
+            await renameLink(activeFolder.shareId, item.LinkID, item.ParentLinkID, formattedName, item.MIMEType);
             await events.call(activeFolder.shareId);
         } catch (e) {
             if (e.name === 'ValidationError') {

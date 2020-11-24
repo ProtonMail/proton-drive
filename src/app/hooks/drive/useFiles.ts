@@ -2,16 +2,8 @@ import { useApi, useEventManager, useNotifications, usePreventLeave, useGetUser 
 import { ReadableStream } from 'web-streams-polyfill';
 import { decryptMessage, encryptMessage } from 'pmcrypto';
 import { c } from 'ttag';
-import { lookup } from 'mime-types';
-import {
-    generateNodeKeys,
-    generateContentKeys,
-    encryptName,
-    generateLookupHash,
-    getStreamMessage,
-} from 'proton-shared/lib/keys/driveKeys';
+import { generateNodeKeys, generateContentKeys, encryptName, getStreamMessage } from 'proton-shared/lib/keys/driveKeys';
 import { range, mergeUint8Arrays } from 'proton-shared/lib/helpers/array';
-import isTruthy from 'proton-shared/lib/helpers/isTruthy';
 import humanSize from 'proton-shared/lib/helpers/humanSize';
 import { splitExtension } from 'proton-shared/lib/helpers/file';
 import { noop } from 'proton-shared/lib/helpers/function';
@@ -51,6 +43,9 @@ import { getMetaForTransfer, isTransferCancelError } from '../../utils/transfer'
 import useEvents from './useEvents';
 import { mimeTypeFromFile } from '../../utils/MimeTypeParser/MimeTypeParser';
 import useConfirm from '../util/useConfirm';
+import { mimetypeFromExtension } from '../../utils/MimeTypeParser/helpers';
+import { adjustName } from '../../utils/link';
+import { generateLookupHash } from '../../utils/hash';
 
 const HASH_CHECK_AMOUNT = 10;
 
@@ -82,19 +77,6 @@ function useFiles() {
 
             const [namePart, extension] = splitExtension(filename);
 
-            const adjustName = (i: number) => {
-                if (i === 0) {
-                    return filename;
-                }
-
-                if (!namePart) {
-                    return [`.${extension}`, `(${i})`].filter(isTruthy).join(' ');
-                }
-
-                const newNamePart = [namePart, `(${i})`].filter(isTruthy).join(' ');
-                return extension ? [newNamePart, extension].join('.') : newNamePart;
-            };
-
             const findAdjustedName = async (
                 start = 0
             ): Promise<{
@@ -103,10 +85,10 @@ function useFiles() {
             }> => {
                 const hashesToCheck = await Promise.all(
                     range(start, start + HASH_CHECK_AMOUNT).map(async (i) => {
-                        const adjustedFileName = adjustName(i);
+                        const adjustedFileName = adjustName(i, namePart, extension);
                         return {
                             filename: adjustedFileName,
-                            hash: await generateLookupHash(adjustedFileName.toLowerCase(), parentKeys.hashKey),
+                            hash: await generateLookupHash(adjustedFileName, parentKeys.hashKey),
                         };
                     })
                 );
@@ -160,13 +142,15 @@ function useFiles() {
         file: File,
         noNameCheck = false
     ) => {
-        const lowercaseName = file.name.toLowerCase();
         let canceled = false;
+        const queuedFnId = FEATURE_FLAGS.includes('nonrestrictive-naming')
+            ? `upload_setup:${file.name}`
+            : `upload_setup:${file.name.toLocaleLowerCase()}`;
         // Queue for files with same name, to not duplicate names
         // Another queue for uploads in general so that they don't timeout
         const setupPromise = queuedFunction(
             'upload_setup',
-            queuedFunction(`upload_setup:${lowercaseName}`, async () => {
+            queuedFunction(queuedFnId, async () => {
                 const error = validateLinkName(file.name);
 
                 if (error) {
@@ -186,7 +170,7 @@ function useFiles() {
                     }
                     return {
                         filename: file.name,
-                        hash: await generateLookupHash(lowercaseName, parentKeys.hashKey),
+                        hash: await generateLookupHash(file.name, parentKeys.hashKey),
                     };
                 };
 
@@ -211,11 +195,9 @@ function useFiles() {
 
                 const Name = await encryptName(filename, parentKeys.privateKey.toPublic(), addressKeyInfo.privateKey);
 
-                const fileMimeType = FEATURE_FLAGS.includes('drive-sprint-25')
+                const MIMEType = FEATURE_FLAGS.includes('mime-types-parser')
                     ? await mimeTypeFromFile(file)
-                    : undefined;
-
-                const MIMEType = fileMimeType || lookup(filename) || 'application/octet-stream';
+                    : await mimetypeFromExtension(filename);
 
                 if (canceled) {
                     throw new TransferCancel({ message: `Transfer canceled for file "${filename}"` });
@@ -428,7 +410,7 @@ function useFiles() {
             const fileCount = countFilesToUpload(files);
 
             if (fileCount >= MAX_SAFE_UPLOADING_FILE_COUNT) {
-                await new Promise((resolve, reject) => {
+                await new Promise<void>((resolve, reject) => {
                     openConfirmModal({
                         canUndo: true,
                         title: c('Title').t`Warning`,
@@ -636,9 +618,9 @@ function useFiles() {
         const fileStreamPromises: Promise<void>[] = [];
         const abortController = new AbortController();
 
-        const downloadFolder = async (linkId: string, filePath = ''): Promise<any> => {
+        const downloadFolder = async (linkId: string, parentPath = ''): Promise<any> => {
             if (abortController.signal.aborted) {
-                throw Error(`Folder download canceled for ${filePath}`);
+                throw Error(`Folder download canceled for ${parentPath}`);
             }
 
             await fetchAllFolderPages(shareId, linkId);
@@ -649,7 +631,6 @@ function useFiles() {
             }
 
             const promises = children.map(async (child) => {
-                const path = `${filePath}/${child.Name}`;
                 if (child.Type === LinkType.FILE) {
                     const promise = new Promise<void>((resolve, reject) => {
                         addDownload(
@@ -660,7 +641,8 @@ function useFiles() {
                                 onStart: async (stream) => {
                                     cb.onStartFileTransfer({
                                         stream,
-                                        path,
+                                        parentPath,
+                                        fileName: child.Name,
                                     }).catch(reject);
                                     return getFileBlocks(shareId, child.LinkID);
                                 },
@@ -687,8 +669,11 @@ function useFiles() {
                         })
                     );
                 } else if (!abortController.signal.aborted) {
-                    cb.onStartFolderTransfer(path).catch((err) => console.error(`Failed to zip empty folder ${err}`));
-                    await downloadFolder(child.LinkID, path);
+                    const folderPath = `${parentPath}/${child.Name}`;
+                    cb.onStartFolderTransfer(folderPath).catch((err) =>
+                        console.error(`Failed to zip empty folder ${err}`)
+                    );
+                    await downloadFolder(child.LinkID, folderPath);
                 }
             });
 
