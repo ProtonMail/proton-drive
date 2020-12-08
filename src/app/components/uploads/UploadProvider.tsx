@@ -132,7 +132,6 @@ export const UploadProvider = ({ children }: UserProviderProps) => {
         }
     }, [uploads]);
 
-    // TODO: fix occasional "file not found" errors
     const addToUploadQueue = async (
         preUploadData: PreUploadData,
         setupPromise: Promise<any>,
@@ -141,15 +140,17 @@ export const UploadProvider = ({ children }: UserProviderProps) => {
         new Promise<void>((resolve, reject) => {
             const { id, uploadControls } = initUpload(preUploadData.file, {
                 ...callbacks,
-                initialize: async () => {
-                    const result = await callbacks.initialize();
-                    updateUploadState(id, TransferState.Progress, {
-                        meta: {
-                            size: preUploadData.file.size,
-                            mimeType: result.MIMEType,
-                            filename: result.filename,
-                        },
-                    });
+                initialize: async (abortSignal) => {
+                    const result = await callbacks.initialize(abortSignal);
+                    if (!abortSignal.aborted) {
+                        updateUploadState(id, TransferState.Progress, {
+                            meta: {
+                                size: preUploadData.file.size,
+                                mimeType: result.MIMEType,
+                                filename: result.filename,
+                            },
+                        });
+                    }
                     return result;
                 },
                 finalize: async (blocklist, config) => {
@@ -192,7 +193,7 @@ export const UploadProvider = ({ children }: UserProviderProps) => {
             return;
         }
 
-        if (isTransferProgress(upload)) {
+        if (isTransferProgress(upload) || isTransferPending(upload)) {
             controls.current[id].pause();
         }
 
