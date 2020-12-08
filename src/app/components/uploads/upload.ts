@@ -4,17 +4,18 @@ import { serializeFormData } from 'proton-shared/lib/fetch/helpers';
 import { createApiError } from 'proton-shared/lib/fetch/ApiError';
 import ChunkFileReader from './ChunkFileReader';
 import { UploadLink } from '../../interfaces/file';
-import { TransferCancel, UploadInfo } from '../../interfaces/transfer';
+import { TransferCancel } from '../../interfaces/transfer';
 import { isTransferCancelError } from '../../utils/transfer';
 import runInQueue from '../../utils/runInQueue';
-import { FILE_CHUNK_SIZE } from '../../constants';
+import { FILE_CHUNK_SIZE, STATUS_CODE } from '../../constants';
 import { waitUntil } from '../../utils/async';
 
 // Max decrypted block size
 const MAX_CHUNKS_READ = 10;
 const MAX_THREADS_PER_UPLOAD = 3;
+const MAX_RETRIES_BEFORE_FAIL = 3;
 
-type BlockList = {
+export type BlockList = {
     EncSignature: string;
     Hash: Uint8Array;
     Size: number;
@@ -46,12 +47,16 @@ export interface UploadCallbacks {
     transform: (buffer: Uint8Array) => Promise<{ encryptedData: Uint8Array; signature: string }>;
     requestUpload: (blockList: BlockList) => Promise<UploadLink[]>;
     finalize: (blocklist: Map<number, BlockTokenInfo>, config?: { id: string }) => Promise<void>;
+    initialize: () => Promise<{
+        filename: string;
+        MIMEType: string;
+    }>;
     onProgress?: (bytes: number) => void;
     onError?: (error: Error) => void;
 }
 
 export interface UploadControls {
-    start: (info: UploadInfo) => Promise<void>;
+    start: () => Promise<void>;
     pause: () => void;
     resume: () => void;
     cancel: () => void;
@@ -84,7 +89,7 @@ export async function upload(
 
         listener = () => {
             // When whole block is uploaded, we mustn't cancel even if we don't get a response
-            if (lastLoaded !== total) {
+            if (!total || lastLoaded !== total) {
                 xhr.abort();
                 reject(new TransferCancel({ id }));
             }
@@ -95,7 +100,7 @@ export async function upload(
         }
 
         xhr.onload = async () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
+            if (xhr.status >= STATUS_CODE.OK && xhr.status < STATUS_CODE.BAD_REQUEST) {
                 resolve();
             } else {
                 reject(
@@ -127,8 +132,12 @@ export async function upload(
     });
 }
 
-export function initUpload(file: File, { requestUpload, transform, onProgress, finalize, onError }: UploadCallbacks) {
+export function initUpload(
+    file: File,
+    { initialize, requestUpload, transform, onProgress, finalize, onError }: UploadCallbacks
+) {
     const id = generateUID('drive-transfers');
+    let abortController: AbortController;
     let paused = false;
 
     const fillUploadQueue = async (
@@ -200,8 +209,9 @@ export function initUpload(file: File, { requestUpload, transform, onProgress, f
     const uploadBlocks = async (
         uploadingBlocks: Map<number, EncryptedBlock>,
         blockTokens: Map<number, BlockTokenInfo>,
-        abortSignal: AbortSignal
-    ) => {
+        abortSignal: AbortSignal,
+        numRetry = 0
+    ): Promise<void> => {
         if (abortSignal.aborted) {
             throw new TransferCancel({ id });
         }
@@ -246,7 +256,11 @@ export function initUpload(file: File, { requestUpload, transform, onProgress, f
                 );
                 uploadingBlocks.delete(index);
             } catch (e) {
-                if (!isTransferCancelError(e) && numRetries < 3) {
+                if (
+                    !isTransferCancelError(e) &&
+                    e.status !== STATUS_CODE.NOT_FOUND &&
+                    numRetries < MAX_RETRIES_BEFORE_FAIL
+                ) {
                     console.error(`Failed block #${index} upload for ${id}. Retry num: ${numRetries}`);
                     resetBlockUploadProgress(block);
                     blockUploaders.push(getBlockUploader(block, numRetries + 1));
@@ -276,20 +290,46 @@ export function initUpload(file: File, { requestUpload, transform, onProgress, f
             blockUploaders.push(getBlockUploader(block));
         });
 
-        await runInQueue(blockUploaders, MAX_THREADS_PER_UPLOAD);
-    };
+        try {
+            await runInQueue(blockUploaders, MAX_THREADS_PER_UPLOAD);
+        } catch (e) {
+            if (e.status === STATUS_CODE.NOT_FOUND && numRetry < MAX_RETRIES_BEFORE_FAIL) {
+                console.error(`Blocks for upload ${id}, might have expired. Retry num: ${numRetry}`);
 
-    let abortController: AbortController;
+                // Cancel all pending blocks because they will have also expired
+                abortController.abort();
+                abortController = new AbortController();
+                resetUploadProgress(uploadingBlocks);
+
+                // Remove block meta (token+url) to request them again
+                uploadingBlocks.forEach((block) => {
+                    delete block.meta;
+                });
+                await uploadBlocks(uploadingBlocks, blockTokens, abortController.signal, numRetry + 1);
+            } else {
+                throw e;
+            }
+        }
+    };
 
     const start = async () => {
         let activeIndex = 1;
         const uploadingBlocks = new Map<number, EncryptedBlock>();
         const blockTokens = new Map<number, BlockTokenInfo>();
         const reader = new ChunkFileReader(file, FILE_CHUNK_SIZE);
+
         abortController = new AbortController();
 
-        const startUpload = async () => {
+        const startUpload = async (initialized = false) => {
             try {
+                if (abortController.signal.aborted) {
+                    throw new TransferCancel({ id });
+                }
+
+                if (!initialized) {
+                    await initialize?.();
+                }
+
                 // Keep filling queue with up to 20 blocks and uploading them
                 while (!reader.isEOF() || uploadingBlocks.size) {
                     activeIndex = await fillUploadQueue(reader, uploadingBlocks, activeIndex);
@@ -300,7 +340,7 @@ export function initUpload(file: File, { requestUpload, transform, onProgress, f
                 if (paused) {
                     resetUploadProgress(uploadingBlocks);
                     await waitUntil(() => paused === false);
-                    await startUpload();
+                    await startUpload(true);
                 } else {
                     abortController.abort();
                     throw e;

@@ -9,9 +9,11 @@ import { ObserverStream, untilStreamEnd } from '../../utils/stream';
 import { TransferCancel } from '../../interfaces/transfer';
 import runInQueue from '../../utils/runInQueue';
 import { waitUntil } from '../../utils/async';
-import { MAX_THREADS_PER_DOWNLOAD, DOWNLOAD_TIMEOUT } from '../../constants';
+import { MAX_THREADS_PER_DOWNLOAD, DOWNLOAD_TIMEOUT, STATUS_CODE } from '../../constants';
+import { isTransferCancelError } from '../../utils/transfer';
 
 const MAX_TOTAL_BUFFER_SIZE = 10; // number of blocks
+const MAX_RETRIES_BEFORE_FAIL = 3;
 
 const toPolyfillReadable = createReadableStreamWrapper(ReadableStream);
 
@@ -25,14 +27,22 @@ export interface DownloadControls {
 }
 
 export interface DownloadCallbacks {
-    onStart: (stream: ReadableStream<Uint8Array>) => Promise<DriveFileBlock[] | Uint8Array[]>;
+    getBlocks: (abortSignal: AbortSignal) => Promise<DriveFileBlock[] | Uint8Array[]>;
+    onStart?: (stream: ReadableStream<Uint8Array>) => void;
     onFinish?: () => void;
     onError?: (err: any) => void;
     onProgress?: (bytes: number) => void;
     transformBlockStream?: StreamTransformer;
 }
 
-export const initDownload = ({ onStart, onProgress, onFinish, onError, transformBlockStream }: DownloadCallbacks) => {
+export const initDownload = ({
+    getBlocks,
+    onStart,
+    onProgress,
+    onFinish,
+    onError,
+    transformBlockStream,
+}: DownloadCallbacks) => {
     const id = generateUID('drive-transfers');
     const fileStream = new ObserverStream();
     const fsWriter = fileStream.writable.getWriter();
@@ -47,9 +57,22 @@ export const initDownload = ({ onStart, onProgress, onFinish, onError, transform
         }
 
         const buffers = new Map<number, { done: boolean; chunks: Uint8Array[] }>();
-        const blocksOrBuffer = await onStart(fileStream.readable);
+        let blocksOrBuffer: DriveFileBlock[] | Uint8Array[];
+
+        try {
+            blocksOrBuffer = await getBlocks(abortController.signal);
+        } catch (err) {
+            // If paused before blocks/meta is fetched (DOM Error), restart on resume pause
+            if (paused && isTransferCancelError(err)) {
+                await waitUntil(() => paused === false);
+                await start(api);
+                return;
+            }
+            throw err;
+        }
 
         await fsWriter.ready;
+        onStart?.(fileStream.readable);
 
         // If initialized with preloaded buffer instead of blocks to download
         if (areUint8Arrays(blocksOrBuffer)) {
@@ -72,18 +95,48 @@ export const initDownload = ({ onStart, onProgress, onFinish, onError, transform
             }
         };
 
-        const getBlockQueue = (startIndex = 1) =>
-            orderBy(blocksOrBuffer, 'Index').filter(({ Index }) => Index >= startIndex);
+        const revertProgress = () => {
+            if (onProgress) {
+                // Revert progress of blacks that weren't finished
+                buffers.forEach((buffer, Index) => {
+                    if (!buffer.done) {
+                        buffers.delete(Index);
+                    }
+                });
 
+                let progressToRevert = 0;
+                incompleteProgress.forEach((progress) => {
+                    progressToRevert += progress;
+                });
+                incompleteProgress.clear();
+                onProgress(-progressToRevert);
+            }
+        };
+
+        let blocks = blocksOrBuffer;
         let activeIndex = 1;
+
+        const getBlockQueue = (startIndex = 1) => orderBy(blocks, 'Index').filter(({ Index }) => Index >= startIndex);
 
         // Downloads several blocks at once, but streams sequentially only one block at a time
         // Other blocks are put into buffer until previous blocks have finished downloading
-        const startDownload = async (blockQueue: DriveFileBlock[]) => {
+        const startDownload = async (blockQueue: DriveFileBlock[], numRetries = 0) => {
             if (!blockQueue.length) {
                 return [];
             }
             activeIndex = blockQueue[0].Index;
+
+            const retryDownload = async (activeIndex: number) => {
+                const newBlocks = await getBlocks(abortController.signal);
+                if (areUint8Arrays(newBlocks)) {
+                    throw new Error('Unexpected Uint8Array block data');
+                }
+                revertProgress();
+                abortController = new AbortController();
+                blocks = newBlocks;
+                await startDownload(getBlockQueue(activeIndex), numRetries + 1);
+            };
+
             const downloadQueue = blockQueue.map(({ URL, Index }) => async () => {
                 if (!buffers.get(Index)?.done) {
                     await waitUntil(() => buffers.size < MAX_TOTAL_BUFFER_SIZE || abortController.signal.aborted);
@@ -152,25 +205,18 @@ export const initDownload = ({ onStart, onProgress, onFinish, onError, transform
             } catch (e) {
                 if (!paused) {
                     abortController.abort();
+
+                    // If block expired, need to request new blocks and retry
+                    if (e.status === STATUS_CODE.UNPROCESSABLE_ENTITY && numRetries < MAX_RETRIES_BEFORE_FAIL) {
+                        console.error(`Blocks for upload ${id}, might have expired. Retry num: ${numRetries}`);
+                        return retryDownload(activeIndex);
+                    }
+
                     fsWriter.abort(e).catch(console.error);
                     throw e;
                 }
 
-                if (onProgress) {
-                    // Revert progress of blacks that weren't finished
-                    buffers.forEach((buffer, Index) => {
-                        if (!buffer.done) {
-                            buffers.delete(Index);
-                        }
-                    });
-
-                    let progressToRevert = 0;
-                    incompleteProgress.forEach((progress) => {
-                        progressToRevert += progress;
-                    });
-                    incompleteProgress.clear();
-                    onProgress(-progressToRevert);
-                }
+                revertProgress();
                 await waitUntil(() => paused === false);
                 await startDownload(getBlockQueue(activeIndex));
             }

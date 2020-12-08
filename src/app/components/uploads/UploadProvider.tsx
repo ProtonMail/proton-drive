@@ -1,13 +1,6 @@
 import React, { createContext, useContext, useState, useRef, useEffect, useCallback } from 'react';
-import { initUpload, UploadCallbacks, UploadControls } from './upload';
-import {
-    TransferState,
-    TransferProgresses,
-    TransferMeta,
-    Upload,
-    UploadInfo,
-    PreUploadData,
-} from '../../interfaces/transfer';
+import { initUpload, UploadControls, UploadCallbacks } from './upload';
+import { TransferState, TransferProgresses, Upload, PreUploadData } from '../../interfaces/transfer';
 import {
     isTransferProgress,
     isTransferPending,
@@ -21,11 +14,7 @@ type UploadStateUpdater = TransferState | ((upload: Upload) => TransferState);
 
 interface UploadProviderState {
     uploads: Upload[];
-    addToUploadQueue: (
-        data: PreUploadData,
-        metadataPromise: Promise<{ meta: TransferMeta; info: UploadInfo }>,
-        callbacks: UploadCallbacks
-    ) => Promise<void>;
+    addToUploadQueue: (data: PreUploadData, metadataPromise: Promise<any>, callbacks: UploadCallbacks) => Promise<void>;
     getUploadsProgresses: () => TransferProgresses;
     getUploadsImmediate: () => Upload[];
     clearUploads: () => void;
@@ -110,23 +99,20 @@ export const UploadProvider = ({ children }: UserProviderProps) => {
     };
 
     useEffect(() => {
-        const uploading = uploads.filter(isTransferProgress);
-        const nextPending = uploads.find(isTransferPending);
+        const uploadingOrReady = uploads.filter(
+            (upload) => isTransferProgress(upload) || (isTransferPending(upload) && upload.ready)
+        );
+        const nextQueued = uploads.find((upload) => isTransferPending(upload) && !upload.ready);
 
-        if (uploading.length < MAX_ACTIVE_UPLOADS && nextPending) {
-            const { id, info } = nextPending;
+        if (uploadingOrReady.length < MAX_ACTIVE_UPLOADS && nextQueued) {
+            const { id } = nextQueued;
 
-            if (!info) {
-                // Should never happen really
-                console.error('Pending upload has no upload info');
-                updateUploadState(id, TransferState.Error);
-                return;
-            }
-
-            updateUploadState(id, TransferState.Progress);
+            updateUploadState(id, TransferState.Pending, {
+                ready: true,
+            });
 
             controls.current[id]
-                .start(info)
+                .start()
                 .then(() => {
                     // Update upload progress to 100%
                     const upload = uploads.find((upload) => upload.id === id);
@@ -146,17 +132,29 @@ export const UploadProvider = ({ children }: UserProviderProps) => {
         }
     }, [uploads]);
 
+    // TODO: fix occasional "file not found" errors
     const addToUploadQueue = async (
         preUploadData: PreUploadData,
-        metadataPromise: Promise<{ meta: TransferMeta; info: UploadInfo }>,
+        setupPromise: Promise<any>,
         callbacks: UploadCallbacks
     ) =>
         new Promise<void>((resolve, reject) => {
             const { id, uploadControls } = initUpload(preUploadData.file, {
                 ...callbacks,
-                finalize: async (...args) => {
+                initialize: async () => {
+                    const result = await callbacks.initialize();
+                    updateUploadState(id, TransferState.Progress, {
+                        meta: {
+                            size: preUploadData.file.size,
+                            mimeType: result.MIMEType,
+                            filename: result.filename,
+                        },
+                    });
+                    return result;
+                },
+                finalize: async (blocklist, config) => {
                     updateUploadState(id, TransferState.Finalizing);
-                    await callbacks.finalize(...args);
+                    await callbacks.finalize(blocklist, config);
                     resolve();
                 },
                 onProgress: (bytes) => {
@@ -174,13 +172,8 @@ export const UploadProvider = ({ children }: UserProviderProps) => {
 
             addNewUpload(id, preUploadData);
 
-            metadataPromise
-                .then(({ meta, info }) => {
-                    updateUploadState(id, TransferState.Pending, {
-                        meta,
-                        info,
-                    });
-                })
+            setupPromise
+                .then(() => updateUploadState(id, TransferState.Pending))
                 .catch((error) => {
                     updateUploadState(id, TransferState.Error, { error });
                     reject(error);

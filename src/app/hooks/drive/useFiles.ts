@@ -2,13 +2,17 @@ import { useApi, useEventManager, useNotifications, usePreventLeave, useGetUser 
 import { ReadableStream } from 'web-streams-polyfill';
 import { decryptMessage, encryptMessage } from 'pmcrypto';
 import { c } from 'ttag';
-import { generateNodeKeys, generateContentKeys, encryptName, getStreamMessage } from 'proton-shared/lib/keys/driveKeys';
+import {
+    generateNodeKeys,
+    generateContentKeys,
+    generateLookupHash,
+    encryptName,
+    getStreamMessage,
+} from 'proton-shared/lib/keys/driveKeys';
 import { range, mergeUint8Arrays } from 'proton-shared/lib/helpers/array';
 import humanSize from 'proton-shared/lib/helpers/humanSize';
-import { splitExtension } from 'proton-shared/lib/helpers/file';
 import { noop } from 'proton-shared/lib/helpers/function';
 import { uint8ArrayToBase64String } from 'proton-shared/lib/helpers/encoding';
-import { FEATURE_FLAGS } from 'proton-shared/lib/constants';
 import {
     DriveFileRevisionResult,
     CreateFileResult,
@@ -18,14 +22,7 @@ import {
 } from '../../interfaces/file';
 import { queryFileRevision, queryCreateFile, queryUpdateFileRevision, queryRequestUpload } from '../../api/files';
 import { useUploadProvider } from '../../components/uploads/UploadProvider';
-import {
-    TransferMeta,
-    TransferState,
-    DownloadInfo,
-    PreUploadData,
-    UploadInfo,
-    TransferCancel,
-} from '../../interfaces/transfer';
+import { TransferMeta, TransferState, DownloadInfo, PreUploadData, TransferCancel } from '../../interfaces/transfer';
 import { useDownloadProvider } from '../../components/downloads/DownloadProvider';
 import { initDownload, StreamTransformer } from '../../components/downloads/download';
 import { streamToBuffer } from '../../utils/stream';
@@ -43,9 +40,7 @@ import { getMetaForTransfer, isTransferCancelError } from '../../utils/transfer'
 import useEvents from './useEvents';
 import { mimeTypeFromFile } from '../../utils/MimeTypeParser/MimeTypeParser';
 import useConfirm from '../util/useConfirm';
-import { mimetypeFromExtension } from '../../utils/MimeTypeParser/helpers';
-import { adjustName } from '../../utils/link';
-import { generateLookupHash } from '../../utils/hash';
+import { adjustName, splitLinkName } from '../../utils/link';
 
 const HASH_CHECK_AMOUNT = 10;
 
@@ -75,7 +70,7 @@ function useFiles() {
                 throw Error('Missing hash key on folder link');
             }
 
-            const [namePart, extension] = splitExtension(filename);
+            const [namePart, extension] = splitLinkName(filename);
 
             const findAdjustedName = async (
                 start = 0
@@ -101,6 +96,7 @@ function useFiles() {
                     return findAdjustedName(start + HASH_CHECK_AMOUNT);
                 }
                 const availableName = hashesToCheck.find(({ hash }) => hash === AvailableHashes[0]);
+
                 if (!availableName) {
                     throw new Error('Backend returned unexpected hash');
                 }
@@ -143,26 +139,65 @@ function useFiles() {
         noNameCheck = false
     ) => {
         let canceled = false;
-        const queuedFnId = FEATURE_FLAGS.includes('nonrestrictive-naming')
-            ? `upload_setup:${file.name}`
-            : `upload_setup:${file.name.toLocaleLowerCase()}`;
+        const queuedFnId = `upload_setup:${file.name}`;
         // Queue for files with same name, to not duplicate names
         // Another queue for uploads in general so that they don't timeout
-        const setupPromise = queuedFunction(
-            'upload_setup',
+        const setupPromise = (async () => {
+            const error = validateLinkName(file.name);
+
+            if (error) {
+                throw new ValidationError(error);
+            }
+
+            const [parentKeys, addressKeyInfo] = await Promise.all([
+                getLinkKeys(shareId, await parentLinkID),
+                getPrimaryAddressKey(),
+            ]);
+
+            const { NodeKey, privateKey, NodePassphrase, NodePassphraseSignature } = await generateNodeKeys(
+                parentKeys.privateKey,
+                addressKeyInfo.privateKey
+            );
+
+            const { sessionKey, ContentKeyPacket } = await generateContentKeys(privateKey);
+
+            if (!ContentKeyPacket) {
+                throw new Error('Could not generate ContentKeyPacket');
+            }
+
+            if (canceled) {
+                throw new TransferCancel({ message: `Transfer canceled for file "${file.name}"` });
+            }
+
+            return {
+                NodeKey,
+                NodePassphrase,
+                NodePassphraseSignature,
+                ContentKeyPacket,
+                sessionKey,
+                privateKey,
+                parentKeys,
+                addressKeyInfo,
+            };
+        })();
+
+        // Queue for files with same name, to not duplicate names
+        // Another queue for uploads in general so that they don't timeout
+        const createFile = queuedFunction(
+            'create_file',
             queuedFunction(queuedFnId, async () => {
-                const error = validateLinkName(file.name);
+                const {
+                    addressKeyInfo,
+                    parentKeys,
+                    ContentKeyPacket,
+                    NodePassphrase,
+                    NodePassphraseSignature,
+                    NodeKey,
+                } = await setupPromise;
 
-                if (error) {
-                    throw new ValidationError(error);
+                if (canceled) {
+                    throw new TransferCancel({ message: `Transfer canceled for file "${file.name}"` });
                 }
-
-                const ParentLinkID = await parentLinkID;
-
-                const [parentKeys, addressKeyInfo] = await Promise.all([
-                    getLinkKeys(shareId, ParentLinkID),
-                    getPrimaryAddressKey(),
-                ]);
 
                 const generateNameHash = async () => {
                     if (!('hashKey' in parentKeys)) {
@@ -174,30 +209,12 @@ function useFiles() {
                     };
                 };
 
-                const { NodeKey, privateKey, NodePassphrase, NodePassphraseSignature } = await generateNodeKeys(
-                    parentKeys.privateKey,
-                    addressKeyInfo.privateKey
-                );
-
-                const { sessionKey, ContentKeyPacket } = await generateContentKeys(privateKey);
-
-                if (!ContentKeyPacket) {
-                    throw new Error('Could not generate ContentKeyPacket');
-                }
-
-                if (canceled) {
-                    throw new TransferCancel({ message: `Transfer canceled for file "${file.name}"` });
-                }
-
                 const { filename, hash: Hash } = noNameCheck
                     ? await generateNameHash()
-                    : await findAvailableName(shareId, ParentLinkID, file.name);
+                    : await findAvailableName(shareId, await parentLinkID, file.name);
 
                 const Name = await encryptName(filename, parentKeys.privateKey.toPublic(), addressKeyInfo.privateKey);
-
-                const MIMEType = FEATURE_FLAGS.includes('mime-types-parser')
-                    ? await mimeTypeFromFile(file)
-                    : await mimetypeFromExtension(filename);
+                const MIMEType = await mimeTypeFromFile(file);
 
                 if (canceled) {
                     throw new TransferCancel({ message: `Transfer canceled for file "${filename}"` });
@@ -208,28 +225,23 @@ function useFiles() {
                         Name,
                         MIMEType,
                         Hash,
-                        ParentLinkID,
                         NodeKey,
                         NodePassphrase,
                         NodePassphraseSignature,
                         SignatureAddress: addressKeyInfo.address.Email,
                         ContentKeyPacket,
+                        ParentLinkID: await parentLinkID,
                     })
                 );
 
                 return {
-                    File,
                     filename,
-                    Name,
+                    File,
                     MIMEType,
-                    sessionKey,
-                    privateKey,
-                    addressKeyInfo,
-                    ParentLinkID,
                 };
             }),
             5
-        )();
+        );
 
         const preUploadData: PreUploadData = {
             file,
@@ -237,119 +249,107 @@ function useFiles() {
             ShareID: shareId,
         };
 
-        return addToUploadQueue(
-            preUploadData,
-            setupPromise.then(({ filename, MIMEType, File, ParentLinkID }): {
-                meta: TransferMeta;
-                info: UploadInfo;
-            } => ({
-                meta: {
-                    size: file.size,
-                    mimeType: MIMEType,
-                    filename,
-                },
-                info: {
-                    ParentLinkID,
-                    LinkID: File.ID,
-                    RevisionID: File.RevisionID,
-                },
-            })),
-            {
-                transform: async (data) => {
-                    const [
-                        { sessionKey, privateKey: nodePrivateKey },
-                        { privateKey: addressPrivateKey },
-                    ] = await Promise.all([setupPromise, getPrimaryAddressKey()]);
+        let createdFile: {
+            ID: string;
+            RevisionID: string;
+        };
 
-                    const { message, signature } = await encryptMessage({
-                        data,
-                        sessionKey,
-                        privateKeys: addressPrivateKey,
-                        armor: false,
-                        detached: true,
-                    });
+        return addToUploadQueue(preUploadData, setupPromise, {
+            initialize: async () => {
+                const result = await createFile();
+                createdFile = result.File;
+                return result;
+            },
+            transform: async (data) => {
+                const [
+                    { sessionKey, privateKey: nodePrivateKey },
+                    { privateKey: addressPrivateKey },
+                ] = await Promise.all([setupPromise, getPrimaryAddressKey()]);
 
-                    const { data: encryptedSignature } = await encryptMessage({
-                        data: signature.packets.write(),
-                        publicKeys: nodePrivateKey.toPublic(),
-                        armor: true,
-                    });
+                const { message, signature } = await encryptMessage({
+                    data,
+                    sessionKey,
+                    privateKeys: addressPrivateKey,
+                    armor: false,
+                    detached: true,
+                });
 
-                    return {
-                        encryptedData: message.packets.write(),
-                        signature: encryptedSignature,
-                    };
-                },
-                requestUpload: async (Blocks) => {
-                    const { File, addressKeyInfo } = await setupPromise;
+                const { data: encryptedSignature } = await encryptMessage({
+                    data: signature.packets.write(),
+                    publicKeys: nodePrivateKey.toPublic(),
+                    armor: true,
+                });
 
-                    const BlockList = await Promise.all(
-                        Blocks.map(({ Hash, ...block }) => ({ ...block, Hash: uint8ArrayToBase64String(Hash) }))
-                    );
+                return {
+                    encryptedData: message.packets.write(),
+                    signature: encryptedSignature,
+                };
+            },
+            requestUpload: async (Blocks) => {
+                const { addressKeyInfo } = await setupPromise;
 
-                    const { UploadLinks } = await debouncedRequest<RequestUploadResult>(
-                        queryRequestUpload({
+                const BlockList = await Promise.all(
+                    Blocks.map(({ Hash, ...block }) => ({ ...block, Hash: uint8ArrayToBase64String(Hash) }))
+                );
+
+                const { UploadLinks } = await debouncedRequest<RequestUploadResult>(
+                    queryRequestUpload({
+                        BlockList,
+                        AddressID: addressKeyInfo.address.ID,
+                        LinkID: createdFile.ID,
+                        RevisionID: createdFile.RevisionID,
+                        ShareID: shareId,
+                    })
+                );
+                return UploadLinks;
+            },
+            finalize: queuedFunction(
+                'upload_finalize',
+                async (blockTokens, config) => {
+                    const hashes: Uint8Array[] = [];
+                    const BlockList: { Index: number; Token: string }[] = [];
+
+                    for (let Index = 1; Index <= blockTokens.size; Index++) {
+                        const info = blockTokens.get(Index);
+                        if (!info) {
+                            throw new Error(`Block Token not found for ${Index} in upload ${config?.id}`);
+                        }
+                        hashes.push(info.Hash);
+                        BlockList.push({
+                            Index,
+                            Token: info.Token,
+                        });
+                    }
+
+                    const contentHashes = mergeUint8Arrays(hashes);
+                    const {
+                        signature,
+                        address: { Email: SignatureAddress },
+                    } = await sign(contentHashes);
+
+                    await debouncedRequest(
+                        queryUpdateFileRevision(shareId, createdFile.ID, createdFile.RevisionID, {
+                            State: FileRevisionState.Active,
                             BlockList,
-                            AddressID: addressKeyInfo.address.ID,
-                            LinkID: File.ID,
-                            RevisionID: File.RevisionID,
-                            ShareID: shareId,
+                            ManifestSignature: signature,
+                            SignatureAddress,
                         })
                     );
-                    return UploadLinks;
+                    events.callAll(shareId).catch(console.error);
                 },
-                finalize: queuedFunction(
-                    'upload_finalize',
-                    async (blockTokens, config) => {
-                        const hashes: Uint8Array[] = [];
-                        const BlockList: { Index: number; Token: string }[] = [];
-
-                        for (let Index = 1; Index <= blockTokens.size; Index++) {
-                            const info = blockTokens.get(Index);
-                            if (!info) {
-                                throw new Error(`Block Token not found for ${Index} in upload ${config?.id}`);
-                            }
-                            hashes.push(info.Hash);
-                            BlockList.push({
-                                Index,
-                                Token: info.Token,
-                            });
-                        }
-
-                        const contentHashes = mergeUint8Arrays(hashes);
-                        const [
-                            { File },
-                            {
-                                signature,
-                                address: { Email: SignatureAddress },
-                            },
-                        ] = await Promise.all([setupPromise, sign(contentHashes)]);
-
-                        await debouncedRequest(
-                            queryUpdateFileRevision(shareId, File.ID, File.RevisionID, {
-                                State: FileRevisionState.Active,
-                                BlockList,
-                                ManifestSignature: signature,
-                                SignatureAddress,
-                            })
-                        );
-                        events.callAll(shareId).catch(console.error);
-                    },
-                    5
-                ),
-                onError: async () => {
-                    try {
-                        canceled = true;
-                        const { File, ParentLinkID } = await setupPromise;
-                        await deleteChildrenLinks(shareId, ParentLinkID, [File.ID]);
-                    } catch (err) {
-                        if (!isTransferCancelError(err)) {
-                            console.error(err);
-                        }
+                5
+            ),
+            onError: async () => {
+                try {
+                    canceled = true;
+                    await deleteChildrenLinks(shareId, await parentLinkID, [createdFile.ID]);
+                } catch (err) {
+                    if (!isTransferCancelError(err)) {
+                        console.error(err);
                     }
-                },
-            }
-        );
+                }
+            },
+        });
     };
 
     const checkHasEnoughSpace = async (files: FileList | File[] | { path: string[]; file?: File }[]) => {
@@ -536,11 +536,15 @@ function useFiles() {
         return data as ReadableStream<Uint8Array>;
     };
 
-    const getFileRevision = async (shareId: string, linkId: string): Promise<DriveFileRevisionResult> => {
-        let fileMeta = await getLinkMeta(shareId, linkId);
+    const getFileRevision = async (
+        shareId: string,
+        linkId: string,
+        abortSignal?: AbortSignal
+    ): Promise<DriveFileRevisionResult> => {
+        let fileMeta = await getLinkMeta(shareId, linkId, { abortSignal });
 
         if (!fileMeta.FileProperties?.ActiveRevision) {
-            fileMeta = await getLinkMeta(shareId, linkId, { skipCache: true });
+            fileMeta = await getLinkMeta(shareId, linkId, { skipCache: true, abortSignal });
         }
 
         const revision = fileMeta.FileProperties?.ActiveRevision;
@@ -549,11 +553,14 @@ function useFiles() {
             throw new Error(`Invalid link metadata, expected File (${LinkType.FILE}), got ${fileMeta.Type}`);
         }
 
-        return debouncedRequest<DriveFileRevisionResult>(queryFileRevision(shareId, linkId, revision.ID));
+        return debouncedRequest<DriveFileRevisionResult>({
+            ...queryFileRevision(shareId, linkId, revision.ID),
+            signal: abortSignal,
+        });
     };
 
-    const getFileBlocks = async (shareId: string, linkId: string) => {
-        const { Revision } = await getFileRevision(shareId, linkId);
+    const getFileBlocks = async (shareId: string, linkId: string, abortSignal?: AbortSignal) => {
+        const { Revision } = await getFileRevision(shareId, linkId, abortSignal);
         return Revision.Blocks;
     };
 
@@ -568,10 +575,8 @@ function useFiles() {
 
         const { downloadControls } = initDownload({
             transformBlockStream: decryptBlockStream(shareId, linkId),
-            onStart: async (stream) => {
-                resolve(streamToBuffer(stream));
-                return getFileBlocks(shareId, linkId);
-            },
+            getBlocks: (abortSignal) => getFileBlocks(shareId, linkId, abortSignal),
+            onStart: (stream) => resolve(streamToBuffer(stream)),
         });
 
         downloadControls.start(api).catch(reject);
@@ -584,7 +589,7 @@ function useFiles() {
 
     const saveFileTransferFromBuffer = async (content: Uint8Array[], meta: TransferMeta, info: DownloadInfo) => {
         return addToDownloadQueue(meta, info, {
-            onStart: async () => content,
+            getBlocks: async () => content,
         });
     };
 
@@ -594,7 +599,7 @@ function useFiles() {
             { ShareID: shareId, LinkID: linkId },
             {
                 transformBlockStream: decryptBlockStream(shareId, linkId),
-                onStart: async () => getFileBlocks(shareId, linkId),
+                getBlocks: async (abortSignal) => getFileBlocks(shareId, linkId, abortSignal),
             }
         );
     };
@@ -637,14 +642,14 @@ function useFiles() {
                             getMetaForTransfer(child),
                             { ShareID: shareId, LinkID: linkId },
                             {
+                                getBlocks: (abortSignal) => getFileBlocks(shareId, child.LinkID, abortSignal),
                                 transformBlockStream: decryptBlockStream(shareId, child.LinkID),
-                                onStart: async (stream) => {
+                                onStart: (stream) => {
                                     cb.onStartFileTransfer({
                                         stream,
                                         parentPath,
                                         fileName: child.Name,
                                     }).catch(reject);
-                                    return getFileBlocks(shareId, child.LinkID);
                                 },
                                 onFinish: () => {
                                     resolve();

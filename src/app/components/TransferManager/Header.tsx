@@ -22,8 +22,8 @@ interface Props {
 }
 
 const Header = ({ downloads, uploads, latestStats, onClose, onToggleMinimize, minimized = false }: Props) => {
-    const [currentUploads, setCurrentUploads] = useState<Upload[]>([]);
-    const [currentDownloads, setCurrentDownloads] = useState<Download[]>([]);
+    const [uploadsInSession, setUploadsInSession] = useState<Upload[]>([]);
+    const [downloadsInSession, setDownloadsInSession] = useState<Download[]>([]);
 
     const minimizeRef = useRef<HTMLButtonElement>(null);
     const transfers = useMemo(() => [...downloads, ...uploads], [uploads, downloads]);
@@ -43,25 +43,25 @@ const Header = ({ downloads, uploads, latestStats, onClose, onToggleMinimize, mi
 
     useEffect(() => {
         if (activeUploadsCount) {
-            setCurrentUploads((currentUploads) => [
-                ...currentUploads.filter((upload) => activeUploads.every(({ id }) => id !== upload.id)),
+            setUploadsInSession((uploadsInSession) => [
+                ...doneUploads.filter((done) => uploadsInSession.some(({ id }) => id === done.id)),
                 ...activeUploads,
             ]);
         } else {
-            setCurrentUploads([]);
+            setUploadsInSession([]);
         }
-    }, [activeUploads]);
+    }, [activeUploads, doneUploads, activeUploadsCount]);
 
     useEffect(() => {
         if (activeDownloadsCount) {
-            setCurrentDownloads((currentDownloads) => [
-                ...currentDownloads.filter((download) => activeDownloads.every(({ id }) => id !== download.id)),
+            setDownloadsInSession((downloadsInSession) => [
+                ...doneDownloads.filter((done) => downloadsInSession.some(({ id }) => id === done.id)),
                 ...activeDownloads,
             ]);
         } else {
-            setCurrentDownloads([]);
+            setDownloadsInSession([]);
         }
-    }, [activeDownloads]);
+    }, [activeDownloads, activeDownloadsCount]);
 
     const getHeadingText = () => {
         const headingElements: string[] = [];
@@ -103,7 +103,7 @@ const Header = ({ downloads, uploads, latestStats, onClose, onToggleMinimize, mi
         }
 
         if (activeUploadsCount) {
-            const uploadProgress = calculateProgress(latestStats, currentUploads);
+            const uploadProgress = calculateProgress(latestStats, uploadsInSession);
             headingElements.push(
                 c('Info').ngettext(
                     msgid`${activeUploadsCount} Uploading ${uploadProgress}%`,
@@ -113,7 +113,7 @@ const Header = ({ downloads, uploads, latestStats, onClose, onToggleMinimize, mi
             );
         }
         if (activeDownloadsCount) {
-            const downloadProgress = calculateProgress(latestStats, currentDownloads);
+            const downloadProgress = calculateProgress(latestStats, downloadsInSession);
             headingElements.push(
                 c('Info').ngettext(
                     msgid`${activeDownloadsCount} Downloading ${downloadProgress}%`,

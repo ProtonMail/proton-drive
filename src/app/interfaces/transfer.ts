@@ -34,21 +34,15 @@ export interface PreUploadData {
     ParentLinkID: string | Promise<string>;
 }
 
-export interface UploadInfo {
-    LinkID: string;
-    RevisionID: string;
-    ParentLinkID: string;
-}
-
 export interface Upload {
     id: string;
     meta: TransferMeta;
     preUploadData: PreUploadData;
-    info?: UploadInfo;
     state: TransferState;
     startDate: Date;
     resumeState?: TransferState;
     error?: Error;
+    ready?: boolean;
 }
 
 export interface DownloadInfo {

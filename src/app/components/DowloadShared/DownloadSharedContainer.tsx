@@ -13,11 +13,11 @@ import LinkDoesNotExistInfo from './LinkDoesNotExistInfo';
 import { InitHandshake, SharedLinkInfo } from '../../interfaces/sharing';
 import DiscountBanner from './DiscountBanner/DiscountBanner';
 import { useDownloadProvider } from '../downloads/DownloadProvider';
+import { STATUS_CODE, DOWNLOAD_SHARED_STATE } from '../../constants';
 
 const REPORT_ABUSE_EMAIL = 'abuse@protonmail.com';
 const ERROR_CODE_INVALID_SRP_PARAMS = 2026;
 const ERROR_CODE_COULD_NOT_IDENTIFY_TARGET = 2000;
-const STATUS_NOT_FOUND = 404;
 
 const DownloadSharedContainer = () => {
     const [showDiscountBanner, setShowDiscountBanner] = useState(true);
@@ -38,6 +38,7 @@ const DownloadSharedContainer = () => {
         return initSRPHandshake(token)
             .then(setHandshakeInfo)
             .catch((e) => {
+                console.error(e);
                 setNotFoundError(e);
                 setHandshakeInfo(null);
             });
@@ -55,6 +56,7 @@ const DownloadSharedContainer = () => {
                     setHandshakeInfo(null);
                 })
                 .catch((e) => {
+                    console.error(e);
                     const { code, status, message } = getApiError(e);
                     let errorText = message;
                     if (passSubmittedManually) {
@@ -62,12 +64,12 @@ const DownloadSharedContainer = () => {
                             errorText = c('Error').t`Incorrect password. Please try again.`;
                             // SRP session ephemerals are destroyed when you retrieve them.
                             initHandshake().catch(console.error);
-                        } else if (code === ERROR_CODE_COULD_NOT_IDENTIFY_TARGET || status === STATUS_NOT_FOUND) {
+                        } else if (code === ERROR_CODE_COULD_NOT_IDENTIFY_TARGET || status === STATUS_CODE.NOT_FOUND) {
                             setNotFoundError(e);
                             errorText = null;
                         }
                     } else {
-                        if (code === ERROR_CODE_INVALID_SRP_PARAMS || status === STATUS_NOT_FOUND) {
+                        if (code === ERROR_CODE_INVALID_SRP_PARAMS || status === STATUS_CODE.NOT_FOUND) {
                             setNotFoundError(e);
                             errorText = null;
                         }
@@ -124,6 +126,7 @@ const DownloadSharedContainer = () => {
     }
 
     let content: ReactNode = null;
+    let contentState = DOWNLOAD_SHARED_STATE.DOES_NOT_EXIST;
     if (notFoundError || (!token && !password)) {
         content = <LinkDoesNotExistInfo />;
     } else if (linkInfo) {
@@ -135,8 +138,10 @@ const DownloadSharedContainer = () => {
                 downloadFile={downloadFile}
             />
         );
+        contentState = DOWNLOAD_SHARED_STATE.DOWNLOAD;
     } else if (handshakeInfo && !password) {
         content = <EnterPasswordInfo submitPassword={submitPassword} />;
+        contentState = DOWNLOAD_SHARED_STATE.ENTER_PASS;
     }
 
     return (
@@ -144,6 +149,7 @@ const DownloadSharedContainer = () => {
             <>
                 {showDiscountBanner && (
                     <DiscountBanner
+                        contentState={contentState}
                         onClose={() => {
                             setShowDiscountBanner(false);
                         }}

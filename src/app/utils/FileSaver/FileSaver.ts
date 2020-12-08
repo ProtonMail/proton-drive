@@ -2,14 +2,14 @@ import { ReadableStream } from 'web-streams-polyfill';
 import { Writer as ZipWriter } from '@transcend-io/conflux';
 import downloadFile from 'proton-shared/lib/helpers/downloadFile';
 import { isWindows } from 'proton-shared/lib/helpers/browser';
-import { splitExtension } from 'proton-shared/lib/helpers/file';
 import { openDownloadStream, initDownloadSW } from './download';
 import { TransferMeta } from '../../interfaces/transfer';
 import { streamToBuffer } from '../stream';
 import { NestedFileStream } from '../../interfaces/file';
 import { MEMORY_DOWNLOAD_LIMIT } from '../../constants';
 import { isTransferCancelError } from '../transfer';
-import { adjustName, adjustWindowsLinkName } from '../link';
+import { adjustName, adjustWindowsLinkName, splitLinkName } from '../link';
+import { SupportedMimeTypes } from '../MimeTypeParser/constants';
 
 class FileSaver {
     private useBlobFallback = false;
@@ -23,7 +23,7 @@ class FileSaver {
 
     private async saveViaDownload(stream: ReadableStream<Uint8Array>, meta: TransferMeta) {
         if (this.useBlobFallback) {
-            return this.saveViaBuffer(stream, meta.filename);
+            return this.saveViaBuffer(stream, meta);
         }
 
         try {
@@ -32,26 +32,26 @@ class FileSaver {
         } catch (err) {
             if (!isTransferCancelError(err)) {
                 console.error('Failed to save file via download, falling back to in-memory download:', err);
-                await this.saveViaBuffer(stream, meta.filename);
+                await this.saveViaBuffer(stream, meta);
             }
         }
     }
 
     // eslint-disable-next-line class-methods-use-this
-    private async saveViaBuffer(stream: ReadableStream<Uint8Array>, filename: string) {
+    private async saveViaBuffer(stream: ReadableStream<Uint8Array>, meta: TransferMeta) {
         try {
             const chunks = await streamToBuffer(stream);
-            downloadFile(new Blob(chunks, { type: 'application/octet-stream; charset=utf-8' }), filename);
+            downloadFile(new Blob(chunks, { type: meta.mimeType }), meta.filename);
         } catch (err) {
             if (!isTransferCancelError(err)) {
-                throw new Error(`File download for ${filename} failed: ${err}`);
+                throw new Error(`File download for ${meta.filename} failed: ${err}`);
             }
         }
     }
 
     async saveAsFile(stream: ReadableStream<Uint8Array>, meta: TransferMeta) {
         if (meta.size && meta.size < MEMORY_DOWNLOAD_LIMIT) {
-            return this.saveViaBuffer(stream, meta.filename);
+            return this.saveViaBuffer(stream, meta);
         }
         return this.saveViaDownload(stream, meta);
     }
@@ -93,7 +93,7 @@ class FileSaver {
 
         const adjustFileName = ({ fileName, parentPath }: NestedFileStream) => {
             const fixedName = isWindows() ? adjustWindowsLinkName(fileName) : fileName;
-            const [namePart, extension] = splitExtension(fixedName);
+            const [namePart, extension] = splitLinkName(fixedName);
 
             const deduplicate = (index = 0): string => {
                 const adjustedName = adjustName(index, namePart, extension);
@@ -111,13 +111,13 @@ class FileSaver {
             return deduplicate();
         };
 
+        const mimeType = SupportedMimeTypes.zip;
+        const zipMeta = { filename, mimeType };
+
         if (this.useBlobFallback) {
-            this.saveViaBuffer(readable, filename).catch(console.error);
+            this.saveViaBuffer(readable, zipMeta).catch(console.error);
         } else {
             try {
-                const mimeType = 'application/zip';
-                const zipMeta = { filename, mimeType };
-
                 const saveStream = await openDownloadStream(zipMeta, {
                     onCancel: () => {
                         files.forEach(({ stream }) => {
@@ -131,7 +131,7 @@ class FileSaver {
                 readable.pipeTo(saveStream).catch(console.error);
             } catch (err) {
                 console.error('Failed to save zip via download, falling back to in-memory download:', err);
-                this.saveViaBuffer(readable, filename).catch(console.error);
+                this.saveViaBuffer(readable, zipMeta).catch(console.error);
             }
         }
 

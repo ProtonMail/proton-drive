@@ -3,12 +3,13 @@ import { Api } from 'proton-shared/lib/interfaces';
 import {
     decryptUnsigned,
     generateNodeKeys,
+    generateLookupHash,
     generateDriveBootstrap,
     generateNodeHashKey,
     encryptPassphrase,
     encryptName,
 } from 'proton-shared/lib/keys/driveKeys';
-import { FEATURE_FLAGS, SORT_DIRECTION } from 'proton-shared/lib/constants';
+import { SORT_DIRECTION } from 'proton-shared/lib/constants';
 import { base64StringToUint8Array, uint8ArrayToBase64String } from 'proton-shared/lib/helpers/encoding';
 
 // These imports must go to proton-shared
@@ -38,16 +39,16 @@ import { queryFolderChildren, queryCreateFolder } from '../../api/folder';
 import { LinkKeys, DriveCache, ShareKeys } from '../../components/DriveCache/DriveCacheProvider';
 import { validateLinkName, ValidationError } from '../validation';
 import { FOLDER_PAGE_SIZE, DEFAULT_SORT_PARAMS, MAX_THREADS_PER_REQUEST, BATCH_REQUEST_SIZE } from '../../constants';
-import { decryptPassphrase, getDecryptedSessionKey, PrimaryAddressKey, VerificationKeys } from './driveCrypto';
+import { decryptPassphrase, getDecryptedSessionKey, PrimaryAddressKey } from './driveCrypto';
 import runInQueue from '../runInQueue';
 import { isPrimaryShare } from '../share';
-import { generateLookupHash } from '../hash';
 import { mimetypeFromExtension } from '../MimeTypeParser/helpers';
 
 export interface FetchLinkConfig {
     fetchLinkMeta?: (id: string) => Promise<LinkMeta>;
     preventRerenders?: boolean;
     skipCache?: boolean;
+    abortSignal?: AbortSignal;
 }
 
 export const createShareAsync = async (
@@ -261,17 +262,16 @@ export const decryptLinkPassphraseAsync = async (
     shareId: string,
     getLinkKeys: (shareId: string, linkId: string, config?: FetchLinkConfig) => Promise<LinkKeys>,
     getShareKeys: (shareId: string) => Promise<ShareKeys>,
-    getVerificationKeys: (email: string) => Promise<VerificationKeys>,
-
+    getVerificationKey: (email: string) => Promise<OpenPGPKey[]>,
     meta: LinkMeta,
     config: FetchLinkConfig = {}
 ) => {
-    const [{ privateKey: parentKey }, { publicKeys }] = await Promise.all([
+    const [{ privateKey: parentKey }, publicKeys] = await Promise.all([
         meta.ParentLinkID
             ? // eslint-disable-next-line @typescript-eslint/no-use-before-define
               await getLinkKeys(shareId, meta.ParentLinkID, config)
             : await getShareKeys(shareId),
-        getVerificationKeys(meta.SignatureAddress),
+        getVerificationKey(meta.SignatureAddress),
     ]);
 
     return decryptPassphrase({
@@ -355,7 +355,7 @@ export const getLinkMetaAsync = async (
 
     const Link = config.fetchLinkMeta
         ? await config.fetchLinkMeta(linkId)
-        : (await api<LinkMetaResult>(queryGetLink(shareId, linkId))).Link;
+        : (await api<LinkMetaResult>({ ...queryGetLink(shareId, linkId), signal: config.abortSignal })).Link;
 
     const { privateKey } = Link.ParentLinkID
         ? await getLinkKeys(shareId, Link.ParentLinkID, config)
@@ -495,7 +495,7 @@ export const renameLinkAsync = async (
         }),
     ]);
 
-    const MIMEType = !FEATURE_FLAGS.includes('mime-types-parser') ? await mimetypeFromExtension(newName) : undefined;
+    const MIMEType = await mimetypeFromExtension(newName);
 
     await api(
         queryRenameLink(shareId, linkId, {
