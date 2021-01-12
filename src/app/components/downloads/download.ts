@@ -3,13 +3,14 @@ import { orderBy, areUint8Arrays } from 'proton-shared/lib/helpers/array';
 import { ReadableStream } from 'web-streams-polyfill';
 import { createReadableStreamWrapper } from '@mattiasbuelens/web-streams-adapter';
 import { Api } from 'proton-shared/lib/interfaces';
+import { FEATURE_FLAGS } from 'proton-shared/lib/constants';
 import { DriveFileBlock } from '../../interfaces/file';
 import { queryFileBlock } from '../../api/files';
 import { ObserverStream, untilStreamEnd } from '../../utils/stream';
 import { TransferCancel } from '../../interfaces/transfer';
 import runInQueue from '../../utils/runInQueue';
 import { waitUntil } from '../../utils/async';
-import { MAX_THREADS_PER_DOWNLOAD, DOWNLOAD_TIMEOUT, STATUS_CODE } from '../../constants';
+import { MAX_THREADS_PER_DOWNLOAD, DOWNLOAD_TIMEOUT, STATUS_CODE, DOWNLOAD_RETRIES_ON_TIMEOUT } from '../../constants';
 import { isTransferCancelError } from '../../utils/transfer';
 
 const MAX_TOTAL_BUFFER_SIZE = 10; // number of blocks
@@ -149,6 +150,9 @@ export const initDownload = ({
                         await api({
                             ...queryFileBlock(URL),
                             timeout: DOWNLOAD_TIMEOUT,
+                            retriesOnTimeout: FEATURE_FLAGS.includes('download-timeout-retry')
+                                ? DOWNLOAD_RETRIES_ON_TIMEOUT
+                                : undefined,
                             signal: abortController.signal,
                             silence: true,
                         })
@@ -208,7 +212,7 @@ export const initDownload = ({
 
                     // If block expired, need to request new blocks and retry
                     if (e.status === STATUS_CODE.UNPROCESSABLE_ENTITY && numRetries < MAX_RETRIES_BEFORE_FAIL) {
-                        console.error(`Blocks for upload ${id}, might have expired. Retry num: ${numRetries}`);
+                        console.error(`Blocks for download ${id}, might have expired. Retry num: ${numRetries}`);
                         return retryDownload(activeIndex);
                     }
 
