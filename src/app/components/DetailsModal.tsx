@@ -39,14 +39,14 @@ const DetailsModal = ({ activeFolder, item, onClose, ...rest }: Props) => {
     const modalTitleID = 'details-modal';
     const isFile = item.Type === LinkType.FILE;
     const title = isFile ? c('Title').t`File details` : c('Title').t`Folder details`;
-    const isShared = item.SharedURLShareID ? c('Info').t`Yes` : c('Info').t`No`;
+    const isShared = item.SharedUrl ? c('Info').t`Yes` : c('Info').t`No`;
 
     return (
         <DialogModal modalTitleID={modalTitleID} onClose={onClose} {...rest}>
             <HeaderModal modalTitleID={modalTitleID} onClose={onClose}>
                 {title}
             </HeaderModal>
-            <div className="pm-modalContent">
+            <div className="modal-content">
                 <InnerModal>
                     <DetailsRow label={c('Title').t`Name`}>
                         <NameCell name={item.Name} />

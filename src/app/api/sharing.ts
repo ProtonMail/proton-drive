@@ -24,10 +24,11 @@ export const queryCreateSharedLink = (shareId: string, data: CreateSharedURL) =>
     };
 };
 
-export const querySharedLinks = (shareId: string) => {
+export const querySharedLinks = (shareId: string, params: { Page: number; PageSize?: number; Recursive?: 1 | 0 }) => {
     return {
         method: 'get',
         url: `drive/shares/${shareId}/urls`,
+        params,
     };
 };
 
@@ -43,5 +44,15 @@ export const queryDeleteSharedLink = (shareId: string, token: string) => {
     return {
         method: 'delete',
         url: `drive/shares/${shareId}/urls/${token}`,
+    };
+};
+
+export const queryDeleteMultipleSharedLinks = (shareId: string, shareURLIds: string[]) => {
+    return {
+        method: 'post',
+        url: `drive/shares/${shareId}/urls/delete_multiple`,
+        data: {
+            ShareURLIDs: shareURLIds,
+        },
     };
 };

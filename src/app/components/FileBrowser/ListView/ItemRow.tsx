@@ -8,8 +8,6 @@ import {
     DragMoveContainer,
     FileIcon,
     TableCell,
-    Tooltip,
-    Icon,
 } from 'react-components';
 import { isEquivalent, pick } from 'proton-shared/lib/helpers/object';
 import { shallowEqual } from 'proton-shared/lib/helpers/array';
@@ -23,16 +21,18 @@ import DescriptiveTypeCell from './Cells/DescriptiveTypeCell';
 import TimeCell from './Cells/TimeCell';
 import SizeCell from './Cells/SizeCell';
 import NameCell from './Cells/NameCell';
+import SharedURLIcon from '../SharedURLIcon';
 
 const ItemRow = ({
     item,
     style,
     shareId,
     selectedItems,
+    layoutType,
     onToggleSelect,
     onClick,
     onShiftClick,
-    showLocation,
+    columns,
     selectItem,
     secondaryActionActive,
     dragMoveControls,
@@ -78,7 +78,7 @@ const ItemRow = ({
                 ref={contextMenu.anchorRef}
                 aria-disabled={item.Disabled}
                 className={classnames([
-                    'pd-fb-list-item no-outline flex',
+                    'file-browser-list-item no-outline flex',
                     (onClick || secondaryActionActive) && !item.Disabled && 'cursor-pointer',
                     (isSelected || dragMoveControls?.isActiveDropTarget || item.Disabled) && 'bg-global-highlight',
                     (dragging || item.Disabled) && 'opacity-50',
@@ -86,51 +86,69 @@ const ItemRow = ({
                 {...itemHandlers}
             >
                 <TableCell className="m0 flex">
-                    <div role="presentation" className="flex flex-items-center" {...checkboxWrapperHandlers}>
+                    <div role="presentation" className="flex flex-align-items-center" {...checkboxWrapperHandlers}>
                         <Checkbox
                             disabled={item.Disabled}
-                            className="increase-surface-click"
+                            className="increase-click-surface"
                             checked={isSelected}
                             {...checkboxHandlers}
                         />
                     </div>
                 </TableCell>
 
-                <TableCell className="m0 flex flex-items-center flex-nowrap flex-item-fluid">
+                <TableCell className="m0 flex flex-align-items-center flex-nowrap flex-item-fluid">
                     <FileIcon mimeType={item.Type === LinkType.FOLDER ? 'Folder' : item.MIMEType} alt={iconText} />
                     <NameCell name={item.Name} />
-                    {item.SharedURLShareID && (
-                        <Tooltip title={c('Tooltip').t`Shared`} className="ml1 flex flex-item-noshrink">
-                            <Icon className="color-primary" name="link" />
-                        </Tooltip>
-                    )}
+                    {item.SharedUrl && <SharedURLIcon expired={item.UrlsExpired} />}
                 </TableCell>
 
-                {showLocation && (
+                {columns.includes('location') && (
                     <TableCell className={classnames(['m0', isDesktop ? 'w20' : 'w25'])}>
                         <LocationCell shareId={shareId} parentLinkId={item.ParentLinkID} />
                     </TableCell>
                 )}
 
-                <TableCell className="m0 w20">
-                    <DescriptiveTypeCell mimeType={item.MIMEType} linkType={item.Type} />
-                </TableCell>
+                {columns.includes('type') && (
+                    <TableCell className="m0 w20">
+                        <DescriptiveTypeCell mimeType={item.MIMEType} linkType={item.Type} />
+                    </TableCell>
+                )}
 
-                {isDesktop && (
+                {isDesktop && columns.includes('modified') && (
                     <TableCell className="m0 w25">
                         <TimeCell time={item.ModifyTime} />
                     </TableCell>
                 )}
 
-                <TableCell className={classnames(['m0', isDesktop ? 'w10' : 'w15'])}>
-                    {isFolder ? '-' : <SizeCell size={item.Size} />}
-                </TableCell>
+                {isDesktop && columns.includes('share_created') && (
+                    <TableCell className="m0 w20">
+                        {item.SharedUrl?.CreateTime && <TimeCell time={item.SharedUrl.CreateTime} />}
+                    </TableCell>
+                )}
+
+                {columns.includes('share_expires') && (
+                    <TableCell className="m0 w20">
+                        {item.SharedUrl &&
+                            (item.SharedUrl.ExpireTime ? (
+                                <TimeCell time={item.SharedUrl.ExpireTime} />
+                            ) : (
+                                c('Label').t`Never`
+                            ))}
+                    </TableCell>
+                )}
+
+                {columns.includes('size') && (
+                    <TableCell className={classnames(['m0', isDesktop ? 'w10' : 'w15'])}>
+                        {isFolder ? '-' : <SizeCell size={item.Size} />}
+                    </TableCell>
+                )}
             </TableRow>
             {!isPreview && !item.Disabled && (
                 <ItemContextMenu
                     item={item}
                     selectedItems={selectedItems}
                     shareId={shareId}
+                    layoutType={layoutType}
                     position={contextMenuPosition}
                     {...contextMenu}
                 />
@@ -146,7 +164,6 @@ export default React.memo(ItemRow, (a, b) => {
 
     const cheapPropsToCheck: (keyof ItemProps)[] = [
         'shareId',
-        'showLocation',
         'secondaryActionActive',
         'style',
         'onToggleSelect',
@@ -155,7 +172,12 @@ export default React.memo(ItemRow, (a, b) => {
     ];
     const cheapPropsEqual = isEquivalent(pick(a, cheapPropsToCheck), pick(b, cheapPropsToCheck));
 
-    if (!cheapPropsEqual || !isEquivalent(a.item, b.item) || !shallowEqual(a.selectedItems, b.selectedItems)) {
+    if (
+        !cheapPropsEqual ||
+        !isEquivalent(a.item, b.item) ||
+        !shallowEqual(a.selectedItems, b.selectedItems) ||
+        !shallowEqual(a.columns, b.columns)
+    ) {
         return false;
     }
 

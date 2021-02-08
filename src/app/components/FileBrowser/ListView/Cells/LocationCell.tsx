@@ -26,11 +26,11 @@ const LocationCell = ({ shareId, parentLinkId }: Props) => {
             .then((items: string[]) => `/${items.join('/')}`)
             .then(setLocation)
             .catch(console.error);
-    }, []);
+    }, [shareId, parentLinkId]);
 
     return (
-        <div key="location" title={location} className="ellipsis">
-            <span className="pre">{location}</span>
+        <div key="location" title={location} className="text-ellipsis">
+            <span className="text-pre">{location}</span>
         </div>
     );
 };

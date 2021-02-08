@@ -1,11 +1,14 @@
 import React, { useState, ReactNode, useEffect } from 'react';
 import { c } from 'ttag';
 import { Icon, useLoading, Button, LinkButton, classnames, TableRowBusy, FileIcon } from 'react-components';
+import { LinkType } from '../../interfaces/link';
 
 interface Props {
     linkId: string;
     name: string;
     depth: number;
+    type: LinkType;
+    mimeType: string;
     disabled?: boolean;
     isSelected: boolean;
     isExpanded: boolean;
@@ -19,6 +22,8 @@ const ExpandableRow = ({
     linkId,
     name,
     depth,
+    type,
+    mimeType,
     disabled = false,
     isSelected,
     isExpanded,
@@ -71,14 +76,15 @@ const ExpandableRow = ({
     return (
         <>
             <tr
-                className={classnames(['pd-folder-tree-listItem cursor-pointer', isSelected && 'bg-global-highlight'])}
+                className={classnames(['folder-tree-list-item cursor-pointer', isSelected && 'bg-global-highlight'])}
                 onClick={handleSelect(linkId)}
             >
-                <td style={{ paddingLeft }} className="flex flex-items-center flex-nowrap m0">
-                    <div className="pd-folder-tree-listItem-expand flex-item-noshrink relative">
+                <td style={{ paddingLeft }} className="flex flex-align-items-center flex-nowrap m0">
+                    <div className="folder-tree-list-item-expand flex-item-noshrink relative">
                         <Button
                             disabled={disabled}
-                            className="pd-folder-tree-listItem-expand-button increase-surface-click"
+                            style={{ visibility: type === LinkType.FILE ? 'hidden' : 'visible' }}
+                            className="folder-tree-list-item-expand-button increase-click-surface"
                             onClick={(e) => {
                                 e.stopPropagation();
                                 e.currentTarget.blur();
@@ -88,15 +94,15 @@ const ExpandableRow = ({
                             <Icon size={12} name="caret" className={expanded ? 'rotateX-180' : undefined} />
                         </Button>
                     </div>
-                    <div key="Name" className="pd-folder-tree-listItem-name flex flex-items-center flex-nowrap w100">
-                        <FileIcon mimeType="Folder" />
-                        <span className="ellipsis" title={name}>
+                    <div key="Name" className="folder-tree-list-item-name flex flex-align-items-center flex-nowrap w100">
+                        <FileIcon mimeType={type === LinkType.FOLDER ? 'Folder' : mimeType} />
+                        <span className="text-ellipsis" title={name}>
                             {name}
                         </span>
                     </div>
                     {isSelected && (
-                        <div className="pd-folder-tree-listItem-selected flex flex-item-noshrink">
-                            <span className="inline-flex bg-pm-blue rounded50 pd-folder-tree-listItem-selected-check">
+                        <div className="folder-tree-list-item-selected flex flex-item-noshrink">
+                            <span className="inline-flex bg-pm-blue rounded50 folder-tree-list-item-selected-check">
                                 <Icon name="on" className="stroke-global-light p0-25" size={16} />
                             </span>
                         </div>

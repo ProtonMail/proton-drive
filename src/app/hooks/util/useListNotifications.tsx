@@ -22,7 +22,7 @@ const getNotificationTextForItemList = (
                 {notificationText}
                 {'. '}
                 <LinkButton
-                    className="alignbaseline nodecoration bold pm-button--currentColor"
+                    className="align-baseline text-no-decoration text-bold button--currentColor"
                     onClick={() => undoAction()}
                 >
                     {c('Action').t`Undo`}
@@ -292,11 +292,40 @@ const useListNotifications = () => {
         });
     };
 
+    const createDeleteSharedLinksNotifications = (deletedCount: number, failedCount: number) => {
+        if (deletedCount) {
+            const notificationText =
+                deletedCount === 1
+                    ? c('Notification').t`The link to your file was deleted.`
+                    : c('Notification').ngettext(
+                          msgid`${deletedCount} link to your file was deleted.`,
+                          `${deletedCount} links to your files were deleted.`,
+                          deletedCount
+                      );
+
+            createNotification({ text: notificationText });
+        }
+
+        if (failedCount) {
+            const notificationText =
+                failedCount === 1
+                    ? c('Notification').t`The link to your file failed to be deleted.`
+                    : c('Notification').ngettext(
+                          msgid`${failedCount} link to your file failed to be deleted.`,
+                          `${failedCount} links to your files failed to be deleted.`,
+                          failedCount
+                      );
+
+            createNotification({ text: notificationText });
+        }
+    };
+
     return {
         createRestoredLinksNotifications,
         createTrashLinksNotifications,
         createMoveLinksNotifications,
         createDeleteLinksNotifications,
+        createDeleteSharedLinksNotifications,
     };
 };
 

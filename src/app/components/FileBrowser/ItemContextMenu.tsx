@@ -3,7 +3,7 @@ import { c } from 'ttag';
 
 import { ContextMenu, DropdownMenuButton, Icon, isPreviewAvailable } from 'react-components';
 
-import { FileBrowserItem } from './interfaces';
+import { FileBrowserItem, FileBrowserLayouts } from './interfaces';
 import { LinkType } from '../../interfaces/link';
 import useToolbarActions from '../../hooks/drive/useToolbarActions';
 
@@ -11,6 +11,7 @@ interface Props {
     item: FileBrowserItem;
     selectedItems: FileBrowserItem[];
     shareId: string;
+    layoutType: FileBrowserLayouts;
     anchorRef: React.RefObject<HTMLElement>;
     isOpen: boolean;
     position:
@@ -23,22 +24,34 @@ interface Props {
     close: () => void;
 }
 
-const ItemContextMenu = ({ item, selectedItems, shareId, anchorRef, isOpen, position, open, close }: Props) => {
+const ItemContextMenu = ({
+    item,
+    selectedItems,
+    shareId,
+    layoutType,
+    anchorRef,
+    isOpen,
+    position,
+    open,
+    close,
+}: Props) => {
     const {
         download,
         openDeletePermanently,
         openDetails,
+        openFilesDetails,
         openMoveToFolder,
         openMoveToTrash,
         openRename,
         preview,
         restoreFromTrash,
         openLinkSharing,
+        openStopSharing,
     } = useToolbarActions();
 
     const isMultiSelect = selectedItems.length > 1;
     const hasFoldersSelected = selectedItems.some((item) => item.Type === LinkType.FOLDER);
-    const hasSharedLink = selectedItems[0]?.SharedURLShareID;
+    const hasSharedLink = !!selectedItems[0]?.SharedUrl;
     const isPreviewHidden = isMultiSelect || hasFoldersSelected || !item.MIMEType || !isPreviewAvailable(item.MIMEType);
 
     useEffect(() => {
@@ -75,6 +88,13 @@ const ItemContextMenu = ({ item, selectedItems, shareId, anchorRef, isOpen, posi
             icon: 'info',
             testId: 'context-menu-details',
             action: () => openDetails(item),
+        },
+        {
+            hidden: !isMultiSelect || hasFoldersSelected,
+            name: c('Action').t`Details`,
+            icon: 'info',
+            testId: 'context-menu-details',
+            action: () => openFilesDetails(selectedItems),
         },
         {
             hidden: false,
@@ -116,13 +136,36 @@ const ItemContextMenu = ({ item, selectedItems, shareId, anchorRef, isOpen, posi
         },
     ];
 
-    const menuButtons = (item.Trashed ? trashMenuItems : driveMenuItems)
+    const shareMenuItems = [
+        {
+            hidden: isMultiSelect,
+            name: c('Action').t`Sharing options`,
+            icon: 'link',
+            testId: 'context-menu-share',
+            action: () => openLinkSharing(shareId, item),
+        },
+        {
+            hidden: false,
+            name: c('Action').t`Stop sharing`,
+            icon: 'broken-link',
+            testId: 'context-menu-stop-sharing',
+            action: () => openStopSharing(shareId, selectedItems),
+        },
+    ];
+
+    const menuItems = {
+        drive: driveMenuItems,
+        sharing: shareMenuItems,
+        trash: trashMenuItems,
+    };
+
+    const menuButtons = menuItems[layoutType]
         .filter((menuItem) => !menuItem.hidden)
         .map((button) => (
             <DropdownMenuButton
                 key={button.name}
                 onContextMenu={(e) => e.stopPropagation()}
-                className="flex flex-nowrap alignleft"
+                className="flex flex-nowrap text-left"
                 onClick={(e) => {
                     e.stopPropagation();
                     button.action();

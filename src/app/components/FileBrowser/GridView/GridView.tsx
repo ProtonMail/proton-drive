@@ -81,7 +81,7 @@ const GridItemCell = ({
 };
 
 function GridView({
-    isTrash,
+    type,
     shareId,
     contents,
     onItemClick,
@@ -124,6 +124,7 @@ function GridView({
             item,
             shareId,
             selectedItems,
+            layoutType: type,
             onToggleSelect: onToggleItemSelected,
             onShiftClick,
             onClick: onItemClick,
@@ -137,7 +138,7 @@ function GridView({
         <div
             ref={containerRef}
             role="presentation"
-            className="flex-noMinChildren flex-item-fluid flex-column no-scroll"
+            className="flex-no-min-children flex-item-fluid flex-column no-scroll"
             onContextMenu={handleContextMenu}
             onClick={clearSelections}
         >
@@ -174,7 +175,7 @@ function GridView({
                 </FixedSizeGrid>
             )}
 
-            {!isTrash && (
+            {type === 'drive' && (
                 <FolderContextMenu
                     isOpen={isContextMenuOpen}
                     open={openContextMenu}

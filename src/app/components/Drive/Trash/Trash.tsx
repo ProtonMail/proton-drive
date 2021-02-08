@@ -38,7 +38,7 @@ function Trash({ shareId }: Props) {
         <EmptyTrash />
     ) : (
         <FileBrowser
-            isTrash
+            type="trash"
             layout={layout}
             scrollAreaRef={scrollAreaRef}
             caption={c('Title').t`Trash`}

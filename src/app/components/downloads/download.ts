@@ -3,7 +3,6 @@ import { orderBy, areUint8Arrays } from 'proton-shared/lib/helpers/array';
 import { ReadableStream } from 'web-streams-polyfill';
 import { createReadableStreamWrapper } from '@mattiasbuelens/web-streams-adapter';
 import { Api } from 'proton-shared/lib/interfaces';
-import { FEATURE_FLAGS } from 'proton-shared/lib/constants';
 import { DriveFileBlock } from '../../interfaces/file';
 import { queryFileBlock } from '../../api/files';
 import { ObserverStream, untilStreamEnd } from '../../utils/stream';
@@ -18,7 +17,10 @@ const MAX_RETRIES_BEFORE_FAIL = 3;
 
 const toPolyfillReadable = createReadableStreamWrapper(ReadableStream);
 
-export type StreamTransformer = (stream: ReadableStream<Uint8Array>) => Promise<ReadableStream<Uint8Array>>;
+export type StreamTransformer = (
+    stream: ReadableStream<Uint8Array>,
+    EncSignature: string
+) => Promise<ReadableStream<Uint8Array>>;
 
 export interface DownloadControls {
     start: (api: (query: any) => any) => Promise<void>;
@@ -138,7 +140,7 @@ export const initDownload = ({
                 await startDownload(getBlockQueue(activeIndex), numRetries + 1);
             };
 
-            const downloadQueue = blockQueue.map(({ URL, Index }) => async () => {
+            const downloadQueue = blockQueue.map(({ URL, Index, EncSignature }) => async () => {
                 if (!buffers.get(Index)?.done) {
                     await waitUntil(() => buffers.size < MAX_TOTAL_BUFFER_SIZE || abortController.signal.aborted);
 
@@ -150,9 +152,7 @@ export const initDownload = ({
                         await api({
                             ...queryFileBlock(URL),
                             timeout: DOWNLOAD_TIMEOUT,
-                            retriesOnTimeout: FEATURE_FLAGS.includes('download-timeout-retry')
-                                ? DOWNLOAD_RETRIES_ON_TIMEOUT
-                                : undefined,
+                            retriesOnTimeout: DOWNLOAD_RETRIES_ON_TIMEOUT,
                             signal: abortController.signal,
                             silence: true,
                         })
@@ -168,8 +168,9 @@ export const initDownload = ({
                     const rawContentStream = blockStream.pipeThrough(progressStream);
 
                     // Decrypt the file block content using streaming decryption
+                    // TODO: make EncSignature type of string, when downloadShared payload will contain encSignature
                     const transformedContentStream = transformBlockStream
-                        ? await transformBlockStream(rawContentStream)
+                        ? await transformBlockStream(rawContentStream, EncSignature || '')
                         : rawContentStream;
 
                     await untilStreamEnd(transformedContentStream, async (data) => {

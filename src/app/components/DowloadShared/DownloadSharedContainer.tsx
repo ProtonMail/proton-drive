@@ -5,6 +5,8 @@ import { c } from 'ttag';
 import { useLoading, LoaderPage, Icon, usePreventLeave, Bordered, useNotifications } from 'react-components';
 import { getApiError } from 'proton-shared/lib/api/helpers/apiErrorHelper';
 
+import { getAppName } from 'proton-shared/lib/apps/helper';
+import { APPS } from 'proton-shared/lib/constants';
 import usePublicSharing from '../../hooks/drive/usePublicSharing';
 import FileSaver from '../../utils/FileSaver/FileSaver';
 import DownloadSharedInfo from './DownloadSharedInfo';
@@ -30,9 +32,11 @@ const DownloadSharedContainer = () => {
     const { hash, pathname } = useLocation();
     const { preventLeave } = usePreventLeave();
     const { createNotification } = useNotifications();
+    const appName = getAppName(APPS.PROTONDRIVE);
 
     const token = useMemo(() => pathname.replace(/\/urls\/?/, ''), [pathname]);
-    const password = useMemo(() => hash.replace('#', ''), [hash]);
+    const pass = useMemo(() => hash.replace('#', ''), [hash]);
+    const [password, setPassword] = useState(pass);
 
     const initHandshake = useCallback(async () => {
         return initSRPHandshake(token)
@@ -45,7 +49,7 @@ const DownloadSharedContainer = () => {
     }, [token, password]);
 
     const getSharedLinkInfo = useCallback(
-        async (password: string, passSubmittedManually = false) => {
+        async (password: string) => {
             if (!handshakeInfo) {
                 return;
             }
@@ -59,22 +63,17 @@ const DownloadSharedContainer = () => {
                     console.error(e);
                     const { code, status, message } = getApiError(e);
                     let errorText = message;
-                    if (passSubmittedManually) {
-                        if (code === ERROR_CODE_INVALID_SRP_PARAMS) {
-                            errorText = c('Error').t`Incorrect password. Please try again.`;
-                            // SRP session ephemerals are destroyed when you retrieve them.
-                            initHandshake().catch(console.error);
-                        } else if (code === ERROR_CODE_COULD_NOT_IDENTIFY_TARGET || status === STATUS_CODE.NOT_FOUND) {
-                            setNotFoundError(e);
-                            errorText = null;
-                        }
-                    } else {
-                        if (code === ERROR_CODE_INVALID_SRP_PARAMS || status === STATUS_CODE.NOT_FOUND) {
-                            setNotFoundError(e);
-                            errorText = null;
-                        }
-                        setHandshakeInfo(null);
+
+                    if (code === ERROR_CODE_INVALID_SRP_PARAMS) {
+                        setPassword('');
+                        errorText = c('Error').t`Incorrect password. Please try again.`;
+                        // SRP session ephemerals are destroyed when you retrieve them.
+                        initHandshake().catch(console.error);
+                    } else if (code === ERROR_CODE_COULD_NOT_IDENTIFY_TARGET || status === STATUS_CODE.NOT_FOUND) {
+                        setNotFoundError(e);
+                        errorText = null;
                     }
+
                     if (errorText) {
                         createNotification({
                             type: 'error',
@@ -104,7 +103,7 @@ const DownloadSharedContainer = () => {
     };
 
     const submitPassword = (pass: string) => {
-        return getSharedLinkInfo(pass, true).catch(console.error);
+        return getSharedLinkInfo(pass).catch(console.error);
     };
 
     useEffect(() => {
@@ -155,24 +154,24 @@ const DownloadSharedContainer = () => {
                         }}
                     />
                 )}
-                <div className="flex flex-column flex-nowrap flex-item-noshrink flex-items-center scroll-if-needed h100v">
-                    <Bordered className="bg-white-dm color-global-grey-dm flex flex-items-center flex-item-noshrink w100 mw40e mbauto mtauto">
-                        <div className="flex flex-column flex-nowrap flex-items-center aligncenter p2 w100">
+                <div className="flex flex-column flex-nowrap flex-item-noshrink flex-align-items-center scroll-if-needed h100v">
+                    <Bordered className="bg-white-dm color-global-grey-dm flex flex-align-items-center flex-item-noshrink w100 max-w40e mbauto mtauto">
+                        <div className="flex flex-column flex-nowrap flex-align-items-center text-center p2 w100">
                             <h3>
-                                <span className="flex flex-nowrap flex-items-center">
+                                <span className="flex flex-nowrap flex-align-items-center">
                                     <Icon name="protondrive" className="mr0-25" size={20} />
-                                    <b>ProtonDrive</b>
+                                    <b>{appName}</b>
                                 </span>
                             </h3>
                             {content}
                         </div>
                     </Bordered>
-                    <div className="color-global-light flex flex-item-noshrink flex-items-end onmobile-pt1">
-                        <div className="aligncenter opacity-50 mb2">
+                    <div className="color-global-light flex flex-item-noshrink flex-align-items-end on-mobile-pt1">
+                        <div className="text-center opacity-50 mb2">
                             <Icon name="lock-check" size={20} />
-                            <div className="small m0">{c('Label').t`Zero-Access Encryption by Proton`}</div>
+                            <div className="text-sm m0">{c('Label').jt`End-to-End Encryption by Proton`}</div>
                             <a
-                                className="small signup-footer-link"
+                                className="text-sm signup-footer-link"
                                 href={`mailto:${REPORT_ABUSE_EMAIL}`}
                                 title={c('Label').t`Report abuse`}
                             >

@@ -5,15 +5,21 @@ export enum LinkType {
     FOLDER = 1,
     FILE = 2,
 }
+
+export type SharedUrlInfo = {
+    CreateTime: number;
+    ExpireTime: number | null;
+    ShareUrlID: string;
+    Token: string;
+};
+
 interface FileProperties {
     ContentKeyPacket: string;
     ActiveRevision: {
         ID: number;
         CreateTime: number;
         Size: number;
-        Hash: string;
-        RootHash: string;
-        RootHashSignature: string;
+        ManifestSignature: string;
         SignatureAddress: string;
         State: FileRevisionState;
     } | null;
@@ -45,7 +51,9 @@ interface DriveLink {
     FileProperties: FileProperties | null;
     FolderProperties: FolderProperties | null;
     Shared: number;
+    UrlsExpired: boolean;
     ShareIDs: string[];
+    ShareUrls: SharedUrlInfo[];
 }
 
 export interface FileLinkMeta extends DriveLink {

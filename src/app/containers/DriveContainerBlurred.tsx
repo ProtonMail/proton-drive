@@ -11,6 +11,8 @@ import {
 } from 'react-components';
 import { c } from 'ttag';
 import { noop } from 'proton-shared/lib/helpers/function';
+import { getAppName } from 'proton-shared/lib/apps/helper';
+import { APPS } from 'proton-shared/lib/constants';
 import DriveSidebar from '../components/layout/DriveSidebar/DriveSidebar';
 import DriveHeader from '../components/layout/DriveHeader';
 import ListView from '../components/FileBrowser/ListView/ListView';
@@ -19,10 +21,11 @@ import { LinkType } from '../interfaces/link';
 const DriveContainerBlurred = () => {
     const scrollAreaRef = useRef<HTMLDivElement>(null);
     const { state: expanded, toggle: toggleExpanded } = useToggle();
+    const appName = getAppName(APPS.PROTONDRIVE);
 
     const logo = <MainLogo to="/" />;
     const dummyUploadButton = (
-        <SidebarPrimaryButton className="nomobile">{c('Action').t`New upload`}</SidebarPrimaryButton>
+        <SidebarPrimaryButton className="no-mobile">{c('Action').t`New upload`}</SidebarPrimaryButton>
     );
     const dummyFolderTitle = c('Title').t`My files`;
 
@@ -48,8 +51,8 @@ const DriveContainerBlurred = () => {
         <>
             <ModalsChildren />
             <PrivateAppContainer isBlurred header={header} sidebar={sidebar}>
-                <PrivateMainArea hasToolbar className="flex-noMinChildren flex-column flex-nowrap">
-                    <div className="mw100 pt0-5 pb0-5 pl0-75 pr0-75 border-bottom">
+                <PrivateMainArea hasToolbar className="flex-no-min-children flex-column flex-nowrap">
+                    <div className="max-w100 pt0-5 pb0-5 pl0-75 pr0-75 border-bottom">
                         <CollapsingBreadcrumbs
                             breadcrumbs={[
                                 {
@@ -63,6 +66,7 @@ const DriveContainerBlurred = () => {
                     </div>
                     <ListView
                         isPreview
+                        type="drive"
                         scrollAreaRef={scrollAreaRef}
                         caption={dummyFolderTitle}
                         shareId="dummy-share"
@@ -77,16 +81,18 @@ const DriveContainerBlurred = () => {
                                 Trashed: null,
                                 Size: 1024 * 1024,
                                 Type: LinkType.FOLDER,
+                                UrlsExpired: false,
                             },
                             {
                                 LinkID: 'dummy-link-2',
                                 ParentLinkID: '',
                                 MIMEType: 'text/plain',
-                                Name: 'Welcome to ProtonDrive.txt',
+                                Name: `Welcome to ${appName}.txt`,
                                 ModifyTime: Date.now() / 1000,
                                 Trashed: null,
                                 Size: 1024 * 1024,
                                 Type: LinkType.FILE,
+                                UrlsExpired: false,
                             },
                         ]}
                         selectedItems={[]}

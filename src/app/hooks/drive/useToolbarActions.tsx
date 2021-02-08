@@ -3,14 +3,18 @@ import { c } from 'ttag';
 
 import { usePreventLeave, useModals } from 'react-components';
 
+import useQueuedFunction from '../util/useQueuedFunction';
 import useFiles from './useFiles';
 import useTrash from './useTrash';
 import useNavigate from './useNavigate';
 import useListNotifications from '../util/useListNotifications';
 import useConfirm from '../util/useConfirm';
+import useSharing from './useSharing';
+import useDrive from './useDrive';
+import useEvents from './useEvents';
 import FileSaver from '../../utils/FileSaver/FileSaver';
 import { getMetaForTransfer } from '../../utils/transfer';
-import { logSettledErrors } from '../../utils/async';
+import { getSuccessfulSettled, logSettledErrors } from '../../utils/async';
 import { LinkType } from '../../interfaces/link';
 import { useDriveActiveFolder } from '../../components/Drive/DriveFolderProvider';
 import { FileBrowserItem } from '../../components/FileBrowser/interfaces';
@@ -19,20 +23,28 @@ import DetailsModal from '../../components/DetailsModal';
 import MoveToFolderModal from '../../components/MoveToFolderModal';
 import CreateFolderModal from '../../components/CreateFolderModal';
 import SharingModal from '../../components/SharingModal/SharingModal';
+import FilesDetailsModal from '../../components/FilesDetailsModal';
+import { RESPONSE_CODE } from '../../constants';
 
 function useToolbarActions() {
+    const queuedFunction = useQueuedFunction();
     const { navigateToLink } = useNavigate();
     const { folder } = useDriveActiveFolder();
     const { startFileTransfer, startFolderTransfer } = useFiles();
     const { preventLeave } = usePreventLeave();
     const { createModal } = useModals();
     const { deleteTrashedLinks, restoreLinks, trashLinks } = useTrash();
+    const { deleteMultipleSharedLinks } = useSharing();
+    const { deleteShare } = useDrive();
+
     const {
         createDeleteLinksNotifications,
         createRestoredLinksNotifications,
         createTrashLinksNotifications,
+        createDeleteSharedLinksNotifications,
     } = useListNotifications();
     const { openConfirmModal } = useConfirm();
+    const events = useEvents();
 
     const download = async (itemsToDownload: FileBrowserItem[]) => {
         if (!folder) {
@@ -101,6 +113,14 @@ function useToolbarActions() {
         createModal(<DetailsModal item={item} activeFolder={folder} />);
     };
 
+    const openFilesDetails = (selectedItems: FileBrowserItem[]) => {
+        if (!folder || !selectedItems.length) {
+            return;
+        }
+
+        createModal(<FilesDetailsModal selectedItems={selectedItems} />);
+    };
+
     const openMoveToTrash = async (itemsToTrash: FileBrowserItem[]) => {
         if (!folder || !itemsToTrash.length) {
             return;
@@ -164,17 +184,70 @@ function useToolbarActions() {
         createModal(<SharingModal shareId={shareId} item={itemToShare} />);
     };
 
+    const openStopSharing = (shareId: string, itemsToStopSharing: FileBrowserItem[]) => {
+        if (!itemsToStopSharing.length) {
+            return;
+        }
+
+        const deleteLinks = async (links: FileBrowserItem[]) => {
+            const urlShareIds: string[] = [];
+            const deleteSharePromiseList: Promise<any>[] = [];
+            const deleteShareQueued = queuedFunction(
+                'deleteShare',
+                async (shareId: string) => {
+                    return deleteShare(shareId);
+                },
+                5
+            );
+
+            links.forEach(({ SharedUrl }) => {
+                if (SharedUrl) {
+                    urlShareIds.push(SharedUrl.ShareUrlID);
+                }
+            });
+
+            const deletedSharedUrlIds = (await deleteMultipleSharedLinks(shareId, urlShareIds)).Responses.filter(
+                (res) => res.Response.Code === RESPONSE_CODE.SUCCESS
+            ).map(({ ShareURLID }) => ShareURLID);
+
+            links.forEach(({ ShareUrlShareID, SharedUrl }) => {
+                if (ShareUrlShareID && SharedUrl?.ShareUrlID && deletedSharedUrlIds.includes(SharedUrl?.ShareUrlID)) {
+                    deleteSharePromiseList.push(deleteShareQueued(ShareUrlShareID));
+                }
+            });
+
+            const deletedCount = (await Promise.allSettled(deleteSharePromiseList).then(getSuccessfulSettled)).length;
+
+            await events.call(shareId);
+            return deletedCount;
+        };
+
+        openConfirmModal({
+            title: c('Title').t`Stop sharing`,
+            confirm: c('Title').t`Stop sharing`,
+            message: c('Info')
+                .t`This will delete the link(s) and remove access to your file(s) for anyone with the link(s).`,
+            onConfirm: async () => {
+                const deletedCount = await deleteLinks(itemsToStopSharing);
+                const failedCount = itemsToStopSharing.length - deletedCount;
+                createDeleteSharedLinksNotifications(deletedCount, failedCount);
+            },
+        });
+    };
+
     return {
         download,
         openCreateFolder,
         openDeletePermanently,
         openDetails,
+        openFilesDetails,
         openMoveToTrash,
         openMoveToFolder,
         openRename,
         preview,
         restoreFromTrash,
         openLinkSharing,
+        openStopSharing,
     };
 }
 

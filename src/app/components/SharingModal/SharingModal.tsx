@@ -1,7 +1,10 @@
-import { getRandomString } from 'proton-shared/lib/helpers/string';
 import React, { useEffect, useState } from 'react';
-import { DialogModal, useLoading, useNotifications } from 'react-components';
 import { c } from 'ttag';
+
+import { SessionKey } from 'pmcrypto';
+import { getRandomString } from 'proton-shared/lib/helpers/string';
+import { DialogModal, useLoading, useNotifications } from 'react-components';
+
 import useDrive from '../../hooks/drive/useDrive';
 import useEvents from '../../hooks/drive/useEvents';
 import useSharing from '../../hooks/drive/useSharing';
@@ -39,7 +42,7 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
     const [includePassword, setIncludePassword] = useState(false);
     const [shareUrlInfo, setShareUrlInfo] = useState<{ ShareURL: ShareURL; keyInfo: SharedURLSessionKeyPayload }>();
     const [error, setError] = useState(false);
-    const { getShareMetaShort, deleteShare } = useDrive();
+    const { getShareMetaShort, deleteShare, getShareKeys } = useDrive();
     const {
         createSharedLink,
         getSharedURLs,
@@ -69,16 +72,26 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
             return password;
         };
 
+        const getShareMetaAsync = async (shareInfo?: { ID: string; sessionKey: SessionKey }) => {
+            return getShareMetaShort(shareId).then(async ({ VolumeID }) => {
+                const result = await createSharedLink(shareId, VolumeID, item.LinkID, generatePassword(), shareInfo);
+                await events.call(shareId);
+                return result;
+            });
+        };
+
         const getToken = async () => {
-            const shareUrlInfo = item.SharedURLShareID
-                ? await getSharedURLs(item.SharedURLShareID).then(async ([sharedUrl]) => {
-                      return decryptSharedLink(sharedUrl);
+            const shareUrlInfo = item.ShareUrlShareID
+                ? await getSharedURLs(item.ShareUrlShareID).then(async ({ ShareURLs: [sharedUrl] }) => {
+                      const shareUrlShareID = item.ShareUrlShareID as string;
+                      if (sharedUrl) {
+                          return decryptSharedLink(sharedUrl);
+                      }
+
+                      const { sessionKey } = await getShareKeys(shareUrlShareID);
+                      return getShareMetaAsync({ ID: shareUrlShareID, sessionKey });
                   })
-                : await getShareMetaShort(shareId).then(async ({ VolumeID }) => {
-                      const result = await createSharedLink(shareId, VolumeID, item.LinkID, generatePassword());
-                      await events.call(shareId);
-                      return result;
-                  });
+                : await getShareMetaAsync();
             setIncludePassword(!isCustomSharedURLPassword(shareUrlInfo.ShareURL));
             setShareUrlInfo(shareUrlInfo);
         };
@@ -91,7 +104,7 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
             .finally(() => {
                 setModalState(SharingModalState.GeneratedLink);
             });
-    }, [shareId, item.LinkID, item.SharedURLShareID, shareUrlInfo?.ShareURL.ShareID]);
+    }, [shareId, item.LinkID, item.SharedUrl, shareUrlInfo?.ShareURL.ShareID]);
 
     const handleSaveExpirationTime = async (duration: EXPIRATION_DAYS) => {
         if (!shareUrlInfo) {
@@ -177,7 +190,8 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
         openConfirmModal({
             title: c('Title').t`Stop sharing`,
             confirm: c('Action').t`Stop sharing`,
-            message: c('Info').t`This will delete the link and remove access to your file for anyone with the link.`,
+            message: c('Info')
+                .t`This will delete the link(s) and remove access to your file(s) for anyone with the link(s).`,
             canUndo: true,
             onConfirm: () => withDeleting(deleteLink()),
         });
@@ -187,7 +201,7 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
 
     const renderModalState = () => {
         if (loading) {
-            return <LoadingState generated={!!item.SharedURLShareID} />;
+            return <LoadingState generated={!!item.SharedUrl} />;
         }
 
         if (error || !shareUrlInfo || !item) {
