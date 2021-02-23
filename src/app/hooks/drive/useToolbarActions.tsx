@@ -14,7 +14,7 @@ import useDrive from './useDrive';
 import useEvents from './useEvents';
 import FileSaver from '../../utils/FileSaver/FileSaver';
 import { getMetaForTransfer } from '../../utils/transfer';
-import { getSuccessfulSettled, logSettledErrors } from '../../utils/async';
+import { logSettledErrors } from '../../utils/async';
 import { LinkType } from '../../interfaces/link';
 import { useDriveActiveFolder } from '../../components/Drive/DriveFolderProvider';
 import { FileBrowserItem } from '../../components/FileBrowser/interfaces';
@@ -24,7 +24,6 @@ import MoveToFolderModal from '../../components/MoveToFolderModal';
 import CreateFolderModal from '../../components/CreateFolderModal';
 import SharingModal from '../../components/SharingModal/SharingModal';
 import FilesDetailsModal from '../../components/FilesDetailsModal';
-import { RESPONSE_CODE } from '../../constants';
 
 function useToolbarActions() {
     const queuedFunction = useQueuedFunction();
@@ -206,9 +205,7 @@ function useToolbarActions() {
                 }
             });
 
-            const deletedSharedUrlIds = (await deleteMultipleSharedLinks(shareId, urlShareIds)).Responses.filter(
-                (res) => res.Response.Code === RESPONSE_CODE.SUCCESS
-            ).map(({ ShareURLID }) => ShareURLID);
+            const deletedSharedUrlIds = await deleteMultipleSharedLinks(shareId, urlShareIds);
 
             links.forEach(({ ShareUrlShareID, SharedUrl }) => {
                 if (ShareUrlShareID && SharedUrl?.ShareUrlID && deletedSharedUrlIds.includes(SharedUrl?.ShareUrlID)) {
@@ -216,10 +213,8 @@ function useToolbarActions() {
                 }
             });
 
-            const deletedCount = (await Promise.allSettled(deleteSharePromiseList).then(getSuccessfulSettled)).length;
-
-            await events.call(shareId);
-            return deletedCount;
+            await Promise.all(deleteSharePromiseList);
+            return deletedSharedUrlIds.length;
         };
 
         openConfirmModal({
@@ -230,6 +225,7 @@ function useToolbarActions() {
             onConfirm: async () => {
                 const deletedCount = await deleteLinks(itemsToStopSharing);
                 const failedCount = itemsToStopSharing.length - deletedCount;
+                await events.callAll(shareId);
                 createDeleteSharedLinksNotifications(deletedCount, failedCount);
             },
         });

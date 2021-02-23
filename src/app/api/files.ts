@@ -11,12 +11,26 @@ export const queryCreateFile = (shareId: string, data: CreateDriveFile) => {
     };
 };
 
-export const queryFileRevision = (shareId: string, linkId: string, revisionId: number) => {
-    return {
+export const queryFileRevision = (
+    shareId: string,
+    linkId: string,
+    revisionId: number,
+    pagination?: { FromBlockIndex: number; PageSize: number }
+) => {
+    const query = {
         method: 'get',
         url: `drive/shares/${shareId}/files/${linkId}/revisions/${revisionId}`,
         silence: true,
     };
+
+    if (pagination) {
+        return {
+            ...query,
+            params: pagination,
+        };
+    }
+
+    return query;
 };
 
 export const queryRequestUpload = (data: {
