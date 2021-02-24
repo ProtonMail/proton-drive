@@ -1,6 +1,6 @@
 {
     "name": "proton-drive",
-    "version": "4.1.10",
+    "version": "4.1.11",
     "description": "Proton-drive",
     "main": "index.ts",
     "scripts": {
