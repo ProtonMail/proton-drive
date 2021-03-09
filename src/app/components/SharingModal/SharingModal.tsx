@@ -33,8 +33,11 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
     const [deleting, withDeleting] = useLoading(false);
     const [saving, withSaving] = useLoading(false);
     const [shareUrlInfo, setShareUrlInfo] = useState<{ ShareURL: ShareURL; keyInfo: SharedURLSessionKeyPayload }>();
-    const [includePassword, setIncludePassword] = useState(false);
-    const [includeExpirationTime, setIncludeExpirationTime] = useState(false);
+    const [passwordToggledOn, setPasswordToggledOn] = useState(false);
+    const [expirationToggledOn, setExpirationToggledOn] = useState(false);
+
+    const [initialPassword, setInitialPassword] = useState('');
+    const [initialExpiration, setInitialExpiration] = useState<number | null>(null);
     const [error, setError] = useState(false);
     const { getShareMetaShort, deleteShare, getShareKeys } = useDrive();
     const { createSharedLink, getSharedURLs, decryptSharedLink, updateSharedLink, deleteSharedLink } = useSharing();
@@ -70,9 +73,13 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
                       return getShareMetaAsync({ ID: shareUrlShareID, sessionKey });
                   })
                 : await getShareMetaAsync();
-            setIncludePassword(!isCustomSharedURLPassword(shareUrlInfo.ShareURL));
-            setIncludeExpirationTime(!!shareUrlInfo.ShareURL?.ExpirationTime);
+
             setShareUrlInfo(shareUrlInfo);
+
+            setPasswordToggledOn(isCustomSharedURLPassword(shareUrlInfo.ShareURL));
+            setExpirationToggledOn(!!shareUrlInfo.ShareURL?.ExpirationTime);
+            setInitialPassword(shareUrlInfo.ShareURL.Password);
+            setInitialExpiration(shareUrlInfo.ShareURL?.ExpirationTime);
         };
 
         getToken()
@@ -85,7 +92,7 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
             });
     }, [shareId, item.LinkID, item.SharedUrl, shareUrlInfo?.ShareURL.ShareID]);
 
-    const handleSaveSharedLink = async (password?: string, duration?: number | null) => {
+    const handleSaveSharedLink = async (newPassword?: string, newDuration?: number | null) => {
         if (!shareUrlInfo) {
             return;
         }
@@ -95,15 +102,15 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
                 shareUrlInfo.ShareURL.ShareID,
                 shareUrlInfo.ShareURL.Token,
                 shareUrlInfo.keyInfo,
-                duration,
-                password
+                newDuration,
+                newPassword
             );
             await events.call(shareId);
             return res;
         };
 
         const updatedFields = await withSaving(update());
-        createNotification({ text: c('Notification').t`Shared link has been changed successfully.` });
+        createNotification({ text: c('Notification').t`Your settings have been changed successfully.` });
         setShareUrlInfo({
             ...shareUrlInfo,
             ShareURL: {
@@ -111,15 +118,21 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
                 ...updatedFields,
             },
         });
-        onClose?.();
+
+        if (updatedFields && updatedFields.Password !== undefined) {
+            setInitialPassword(updatedFields.Password);
+        }
+        if (updatedFields && updatedFields.ExpirationTime !== undefined) {
+            setInitialExpiration(updatedFields.ExpirationTime);
+        }
     };
 
     const handleToggleIncludePassword = () => {
-        setIncludePassword((includePassword) => !includePassword);
+        setPasswordToggledOn((passwordToggledOn) => !passwordToggledOn);
     };
 
     const handleToggleIncludeExpirationTime = () => {
-        setIncludeExpirationTime((includeExpirationTime) => !includeExpirationTime);
+        setExpirationToggledOn((expirationToggledOn) => !expirationToggledOn);
     };
 
     const handleDeleteLinkClick = () => {
@@ -161,8 +174,8 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
             return (
                 <GeneratedLinkState
                     modalTitleID={modalTitleID}
-                    includePassword={includePassword}
-                    includeExpirationTime={includeExpirationTime}
+                    passwordToggledOn={passwordToggledOn}
+                    expirationToggledOn={expirationToggledOn}
                     customPassword={isCustomSharedURLPassword(shareUrlInfo.ShareURL)}
                     itemName={item.Name}
                     onClose={onClose}
@@ -170,8 +183,8 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
                     onIncludeExpirationTimeToogle={handleToggleIncludeExpirationTime}
                     onSaveLinkClick={handleSaveSharedLink}
                     onDeleteLinkClick={handleDeleteLinkClick}
-                    initialPassword={shareUrlInfo.ShareURL.Password}
-                    initialExpiration={shareUrlInfo.ShareURL.ExpirationTime}
+                    initialPassword={initialPassword}
+                    initialExpiration={initialExpiration}
                     token={shareUrlInfo.ShareURL.Token}
                     deleting={deleting}
                     saving={saving}
@@ -181,7 +194,7 @@ function SharingModal({ modalTitleID = 'sharing-modal', onClose, shareId, item, 
     };
 
     return (
-        <DialogModal modalTitleID={modalTitleID} onClose={onClose} {...rest}>
+        <DialogModal modalTitleID={modalTitleID} {...rest}>
             {renderModalState()}
         </DialogModal>
     );

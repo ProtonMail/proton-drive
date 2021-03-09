@@ -6,6 +6,7 @@ import { c } from 'ttag';
 interface Props {
     expiration: number | null;
     handleExpirationChange: (exp: number) => void;
+    disabled?: boolean;
 }
 
 const getMaxDate = () => {
@@ -14,7 +15,7 @@ const getMaxDate = () => {
     return date;
 };
 
-const ExpirationTimeDatePicker = ({ expiration, handleExpirationChange }: Props) => {
+const ExpirationTimeDatePicker = ({ expiration, handleExpirationChange, disabled }: Props) => {
     const initialValue = expiration ? fromUnixTime(expiration) : undefined;
     const [expDate, setExpDate] = useState<Date | undefined>(initialValue);
     const [expTime, setExpTime] = useState<Date | undefined>(initialValue);
@@ -73,8 +74,9 @@ const ExpirationTimeDatePicker = ({ expiration, handleExpirationChange }: Props)
     return (
         <>
             <DateInput
-                id="dateInputId"
+                id="epirationDateInputId"
                 className="flex-item-fluid flex-item-grow-2"
+                disabled={disabled}
                 value={expDate}
                 onChange={handleChangeDate}
                 displayWeekNumbers={false}
@@ -82,15 +84,18 @@ const ExpirationTimeDatePicker = ({ expiration, handleExpirationChange }: Props)
                 max={MAX_DATE}
                 placeholder={c('Title').t`Date`}
                 title={c('Title').t`Select link expiration date`}
+                data-testid="epirationDateInputId"
             />
             {expTime && (
                 <TimeInput
-                    id="event-startTime"
+                    id="epirationTimeInputId"
                     className="ml0-5 flex-item-fluid"
+                    disabled={disabled}
                     value={expTime}
                     onChange={handleChangeTime}
                     max={maxTime}
                     title={c('Title').t`Select link expiration time`}
+                    data-testid="epirationTimeInputId"
                 />
             )}
         </>
