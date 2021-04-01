@@ -27,7 +27,7 @@ const DownloadSharedContainer = () => {
     const [notFoundError, setNotFoundError] = useState<Error | undefined>();
     const [loading, withLoading] = useLoading(false);
     const [handshakeInfo, setHandshakeInfo] = useState<InitHandshake | null>();
-    const [linkInfo, setLinkInfo] = useState<SharedLinkInfo | null>();
+    const [linkInfo, setLinkInfo] = useState<(SharedLinkInfo & { Password: string }) | null>();
     const { initSRPHandshake, getSharedLinkPayload, startSharedFileTransfer } = usePublicSharing();
     const { hash, pathname } = useLocation();
     const { preventLeave } = usePreventLeave();
@@ -59,7 +59,7 @@ const DownloadSharedContainer = () => {
                 PageSize: BATCH_REQUEST_SIZE,
             })
                 .then((linkInfo) => {
-                    setLinkInfo(linkInfo);
+                    setLinkInfo({ ...linkInfo, Password: password });
                     setHandshakeInfo(null);
                 })
                 .catch((e) => {
@@ -94,14 +94,14 @@ const DownloadSharedContainer = () => {
             return;
         }
 
-        const { Name, Size, MIMEType, SessionKey, NodeKey, Blocks } = linkInfo;
+        const { Name, Size, MIMEType, SessionKey, NodeKey, Blocks, Password } = linkInfo;
         const transferMeta = {
             filename: Name,
             size: Size,
             mimeType: MIMEType,
         };
 
-        const fileStream = await startSharedFileTransfer(SessionKey, NodeKey, transferMeta, token, password, Blocks);
+        const fileStream = await startSharedFileTransfer(SessionKey, NodeKey, transferMeta, token, Password, Blocks);
         return preventLeave(FileSaver.saveAsFile(fileStream, transferMeta)).catch(console.error);
     };
 
@@ -157,8 +157,8 @@ const DownloadSharedContainer = () => {
                         }}
                     />
                 )}
-                <div className="flex flex-column flex-nowrap flex-item-noshrink flex-align-items-center scroll-if-needed h100v">
-                    <Bordered className="bg-white-dm color-global-grey-dm flex flex-align-items-center flex-item-noshrink w100 max-w40e mbauto mtauto">
+                <div className="ui-standard flex flex-column flex-nowrap flex-item-noshrink flex-align-items-center scroll-if-needed h100v">
+                    <Bordered className="bg-norm color-norm flex flex-align-items-center flex-item-noshrink w100 max-w40e mbauto mtauto">
                         <div className="flex flex-column flex-nowrap flex-align-items-center text-center p2 w100">
                             <h3>
                                 <span className="flex flex-nowrap flex-align-items-center">
@@ -169,7 +169,7 @@ const DownloadSharedContainer = () => {
                             {content}
                         </div>
                     </Bordered>
-                    <div className="color-global-light flex flex-item-noshrink flex-align-items-end on-mobile-pt1">
+                    <div className="color-weak flex flex-item-noshrink flex-align-items-end on-mobile-pt1">
                         <div className="text-center opacity-50 mb4">
                             <a
                                 className="text-sm signup-footer-link"

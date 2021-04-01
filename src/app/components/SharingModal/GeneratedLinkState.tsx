@@ -14,7 +14,6 @@ import {
     Input,
     Label,
     PrimaryButton,
-    ResetButton,
     Row,
     Toggle,
     useNotifications,
@@ -202,7 +201,7 @@ function GeneratedLinkState({
                                     <Label htmlFor="passwordModeToggle">
                                         <span className="mr0-5">{c('Label').t`Password protection`}</span>
                                     </Label>
-                                    <div className="flex flex-justify-start mr0-5 on-mobile-mr0">
+                                    <div className="flex flex-justify-start pt0-5 mr0-5 on-mobile-mr0">
                                         <Toggle
                                             id="passwordModeToggle"
                                             className="on-mobile-mb0-5"
@@ -238,6 +237,7 @@ function GeneratedLinkState({
                                     <div className="flex-no-min-children flex-justify-end ml0-5 on-mobile-ml0">
                                         <Button
                                             id="copy-password-button"
+                                            disabled={!password}
                                             hidden={!passwordToggledOn}
                                             onClick={handleCopyPasswordClick}
                                             className="min-w7e"
@@ -248,7 +248,7 @@ function GeneratedLinkState({
                                     <Label htmlFor="expirationTimeModeToggle">
                                         <span className="mr0-5">{c('Label').t`Expiration Date`}</span>
                                     </Label>
-                                    <div className="flex flex-justify-start mr0-5 on-mobile-mr0">
+                                    <div className="flex flex-justify-start pt0-5 mr0-5 on-mobile-mr0">
                                         <Toggle
                                             id="expirationTimeModeToggle"
                                             className="on-mobile-mb0-5"
@@ -280,7 +280,7 @@ function GeneratedLinkState({
                             <Button loading={deleting} disabled={saving} onClick={onDeleteLinkClick}>{c('Action')
                                 .t`Stop sharing`}</Button>
                             <div>
-                                <ResetButton disabled={saving || deleting}>{c('Action').t`Close`}</ResetButton>
+                                <Button type="reset" disabled={saving || deleting}>{c('Action').t`Close`}</Button>
                                 <PrimaryButton loading={saving} disabled={isSaveDisabled} className="ml1" type="submit">
                                     {c('Action').t`Save`}
                                 </PrimaryButton>

@@ -1,5 +1,5 @@
 .folder-tree {
-    @extend .bordered-container;
+    @extend .bordered;
     @extend .scroll-if-needed;
 
     border-radius: $global-border-radius;
@@ -18,11 +18,11 @@
         }
 
         &-expand {
-            padding: .85em;
+            padding: 0.85em;
 
             &-button {
                 @extend .button;
-                @extend .button--for-icon;
+                @extend .button-for-icon;
 
                 display: flex;
                 padding: 0;
