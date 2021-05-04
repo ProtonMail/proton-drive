@@ -21,7 +21,9 @@ import DescriptiveTypeCell from './Cells/DescriptiveTypeCell';
 import TimeCell from './Cells/TimeCell';
 import SizeCell from './Cells/SizeCell';
 import NameCell from './Cells/NameCell';
+import ShareCell from './Cells/ShareCell';
 import SharedURLIcon from '../SharedURLIcon';
+import { useDriveCache } from '../../DriveCache/DriveCacheProvider';
 
 const ItemRow = ({
     item,
@@ -62,6 +64,11 @@ const ItemRow = ({
     });
 
     const { isDesktop } = useActiveBreakpoint();
+    const cache = useDriveCache();
+    const shareURL =
+        columns.includes('share_num_access') && item.SharedUrl
+            ? cache.get.shareURL(shareId, item.SharedUrl?.ShareUrlID)
+            : undefined;
 
     const generateExpiresCell = () => {
         const expiredPart = isDesktop ? (
@@ -82,6 +89,12 @@ const ItemRow = ({
             ))
         );
     };
+
+    const showShareOnHover = (
+        item.Type === LinkType.FILE
+        && item.Trashed === null
+        && !item.SharedUrl
+    );
 
     return (
         <>
@@ -120,6 +133,7 @@ const ItemRow = ({
                     <FileIcon mimeType={item.Type === LinkType.FOLDER ? 'Folder' : item.MIMEType} alt={iconText} />
                     <NameCell name={item.Name} />
                     {item.SharedUrl && <SharedURLIcon expired={item.UrlsExpired} />}
+                    {showShareOnHover && <ShareCell shareId={shareId} item={item} />}
                 </TableCell>
 
                 {columns.includes('location') && (
@@ -141,12 +155,16 @@ const ItemRow = ({
                 )}
 
                 {isDesktop && columns.includes('share_created') && (
-                    <TableCell className="m0 w20">
+                    <TableCell className="m0 w15">
                         {item.SharedUrl?.CreateTime && <TimeCell time={item.SharedUrl.CreateTime} />}
                     </TableCell>
                 )}
 
-                {columns.includes('share_expires') && <TableCell className="m0 w30">{generateExpiresCell()}</TableCell>}
+                {isDesktop && columns.includes('share_num_access') && (
+                    <TableCell className="m0 w15">{shareURL?.NumAccesses || 0}</TableCell>
+                )}
+
+                {columns.includes('share_expires') && <TableCell className="m0 w20">{generateExpiresCell()}</TableCell>}
 
                 {columns.includes('size') && (
                     <TableCell className={classnames(['m0', isDesktop ? 'w10' : 'w15'])}>

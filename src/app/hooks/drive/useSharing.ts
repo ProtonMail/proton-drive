@@ -5,6 +5,7 @@ import { srpGetVerify } from 'proton-shared/lib/srp';
 import { base64StringToUint8Array, uint8ArrayToBase64String } from 'proton-shared/lib/helpers/encoding';
 import { chunk } from 'proton-shared/lib/helpers/array';
 import { decryptUnsigned, encryptUnsigned } from 'proton-shared/lib/keys/driveKeys';
+import runInQueue from 'proton-shared/lib/helpers/runInQueue';
 import { useApi, usePreventLeave } from 'react-components';
 import {
     queryCreateSharedLink,
@@ -15,7 +16,6 @@ import {
 } from '../../api/sharing';
 import useDrive from './useDrive';
 import useDriveCrypto from './useDriveCrypto';
-import runInQueue from '../../utils/runInQueue';
 import useDebouncedRequest from '../util/useDebouncedRequest';
 import {
     BATCH_REQUEST_SIZE,
@@ -239,6 +239,8 @@ function useSharing() {
             sharedURLShareId,
             decryptedLinks.length < PageSize ? 'complete' : 'incremental'
         );
+
+        cache.set.shareURLs(new Map(ShareURLs.map((shareURL) => [shareURL.ShareURLID, shareURL])), sharedURLShareId);
 
         return {
             ShareURLs,
