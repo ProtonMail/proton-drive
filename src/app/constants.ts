@@ -28,11 +28,16 @@ export const EXPENSIVE_REQUEST_TIMEOUT = 60000;
 export const MAX_NAME_LENGTH = 255;
 export const MIN_SHARED_URL_PASSWORD_LENGTH = 8;
 
+export const SHARE_GENERATED_PASSWORD_LENGTH = 12;
 export const DEFAULT_SHARE_MAX_ACCESSES = 10000;
 
 export const MAX_SAFE_UPLOADING_FILE_COUNT = 500;
 
 export const CUSTOM_DATA_FORMAT = 'pd-custom';
+
+export const THUMBNAIL_MAX_SIDE = 320; // in pixels
+export const THUMBNAIL_MAX_SIZE = 16 * 1024; // in bytes, 16kB
+export const THUMBNAIL_QUALITIES = [0.7, 0.5, 0.3, 0.1, 0]; // Used qualities to stick under THUMBNAIL_MAX_SIZE.
 
 export enum LinkURLType {
     FOLDER = 'folder',
@@ -68,12 +73,6 @@ export enum RESPONSE_CODE {
     SUCCESS = 1000,
     NOT_ALLOWED = 2011,
     ALREADY_EXISTS = 2500,
-}
-
-export enum DOWNLOAD_SHARED_STATE {
-    ENTER_PASS = 0,
-    DOWNLOAD = 1,
-    DOES_NOT_EXIST = 2,
 }
 
 export const fileDescriptions: { [type: string]: string } = {
