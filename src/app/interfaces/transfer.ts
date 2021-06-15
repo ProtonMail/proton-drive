@@ -8,6 +8,7 @@ export enum TransferState {
     Done = 'done',
     Canceled = 'canceled',
     Error = 'error',
+    NetworkError = 'networkError',
     Paused = 'paused',
 }
 
@@ -19,6 +20,11 @@ export interface TransferMeta {
     filename: string;
     mimeType: string;
     size?: number;
+}
+
+export interface TransferSummary {
+    size: number;
+    progress: number;
 }
 
 export class TransferCancel extends Error {

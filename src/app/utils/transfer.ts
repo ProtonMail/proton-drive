@@ -1,4 +1,4 @@
-import { TransferState, TransferMeta, Transfer } from '../interfaces/transfer';
+import { TransferState, TransferMeta, Transfer, TransferSummary } from '../interfaces/transfer';
 import { LinkMeta } from '../interfaces/link';
 import { FileBrowserItem } from '../components/FileBrowser/interfaces';
 import { ProgressBarStatus } from '../components/TransferManager/ProgressBar';
@@ -17,7 +17,8 @@ export const isTransferFailed = ({ state }: { state: TransferState }) =>
 
 export const isTransferDone = ({ state }: { state: TransferState }) => state === TransferState.Done;
 
-export const isTransferError = ({ state }: { state: TransferState }) => state === TransferState.Error;
+export const isTransferError = ({ state }: { state: TransferState }) =>
+    state === TransferState.Error || state === TransferState.NetworkError;
 
 export const isTransferCanceled = ({ state }: { state: TransferState }) => state === TransferState.Canceled;
 
@@ -25,7 +26,10 @@ export const isTransferProgress = ({ state }: { state: TransferState }) => state
 
 export const isTransferInitializing = ({ state }: { state: TransferState }) => state === TransferState.Initializing;
 
-export const isTransferPaused = ({ state }: { state: TransferState }) => state === TransferState.Paused;
+export const isTransferManuallyPaused = ({ state }: { state: TransferState }) => state === TransferState.Paused;
+
+export const isTransferPaused = ({ state }: { state: TransferState }) =>
+    state === TransferState.Paused || state === TransferState.NetworkError;
 
 export const isTransferPending = ({ state }: { state: TransferState }) => state === TransferState.Pending;
 
@@ -43,23 +47,38 @@ export const getMetaForTransfer = (item: FileBrowserItem | LinkMeta): TransferMe
 
 export const getProgressBarStatus = (transferState: TransferState): ProgressBarStatus => {
     return (
-        ({
-            [TransferState.Done]: ProgressBarStatus.Success,
-            [TransferState.Canceled]: ProgressBarStatus.Disabled,
-            [TransferState.Error]: ProgressBarStatus.Error,
-        } as any)[transferState] || ProgressBarStatus.Running
+        (
+            {
+                [TransferState.Done]: ProgressBarStatus.Success,
+                [TransferState.Canceled]: ProgressBarStatus.Disabled,
+                [TransferState.Error]: ProgressBarStatus.Error,
+            } as any
+        )[transferState] || ProgressBarStatus.Running
     );
 };
 
 export const calculateProgress = (latestStats: TransfersStats, transfers: Transfer[]) => {
-    const result = transfers.reduce(
-        (result, transfer) => {
-            result.size += transfer.meta.size || 0;
-            result.progress += latestStats.stats[transfer.id]?.progress || 0;
-            return result;
-        },
-        { size: 0, progress: 0 }
-    );
+    /**
+     * Returns a transfer summary while compensating for empty files.
+     * We consider empty files as 1 byte to avoid constant 0% progress
+     * along the trasfer with multiple empty files.
+     */
+    function transferSummaryReducer(acc: TransferSummary, transfer: Transfer): TransferSummary {
+        const emptyFileCompensationInBytes = 1;
+        if (transfer.meta.size === 0) {
+            if (transfer.state === TransferState.Done) {
+                acc.progress += emptyFileCompensationInBytes;
+            }
+            acc.size += emptyFileCompensationInBytes;
+        } else {
+            acc.size += transfer.meta.size || 0;
+            acc.progress += latestStats.stats[transfer.id]?.progress || 0;
+        }
 
-    return Math.floor(100 * (result.progress / (result.size || 1)));
+        return acc;
+    }
+
+    const { progress, size } = transfers.reduce(transferSummaryReducer, { progress: 0, size: 0 });
+
+    return Math.floor(100 * (progress / (size || 1)));
 };

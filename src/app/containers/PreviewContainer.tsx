@@ -1,7 +1,14 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { RouteComponentProps } from 'react-router-dom';
+import { RouteComponentProps, useLocation } from 'react-router-dom';
 
-import { useLoading, usePreventLeave, isPreviewAvailable, FilePreview, NavigationControl } from 'react-components';
+import {
+    useLoading,
+    usePreventLeave,
+    isPreviewAvailable,
+    FilePreview,
+    NavigationControl,
+    useModals,
+} from 'react-components';
 
 import useFiles from '../hooks/drive/useFiles';
 import useDrive from '../hooks/drive/useDrive';
@@ -12,11 +19,14 @@ import { isTransferCancelError, getMetaForTransfer } from '../utils/transfer';
 import { DownloadControls } from '../components/downloads/download';
 import { useDriveCache } from '../components/DriveCache/DriveCacheProvider';
 import { useDriveActiveFolder } from '../components/Drive/DriveFolderProvider';
+import { mapLinksToChildren } from '../components/Drive/helpers';
+import DetailsModal from '../components/DetailsModal';
+import SharingModal from '../components/SharingModal/SharingModal';
 import { LinkMeta, LinkType } from '../interfaces/link';
 
 const PreviewContainer = ({ match }: RouteComponentProps<{ shareId: string; linkId: string }>) => {
     const { shareId, linkId } = match.params;
-    const { navigateToLink } = useNavigate();
+    const { navigateToLink, navigateToSharedURLs } = useNavigate();
     const cache = useDriveCache();
     const downloadControls = useRef<DownloadControls>();
     const { setFolder } = useDriveActiveFolder();
@@ -26,12 +36,17 @@ const PreviewContainer = ({ match }: RouteComponentProps<{ shareId: string; link
     const [loading, withLoading] = useLoading(true);
     const [contents, setContents] = useState<Uint8Array[]>();
     const [, setError] = useState();
+    const { createModal } = useModals();
+
+    const referer = new URLSearchParams(useLocation().search).get('r');
+    const useNavigation = !referer?.startsWith('/shared-urls');
 
     const rootRef = useRef<HTMLDivElement>(null);
 
     const meta = cache.get.linkMeta(shareId, linkId);
     const { sortedList } = useDriveSorting(
-        (sortParams) => (meta && cache.get.childLinkMetas(shareId, meta.ParentLinkID, sortParams)) || []
+        (sortParams) =>
+            (meta && useNavigation && cache.get.childLinkMetas(shareId, meta.ParentLinkID, sortParams)) || []
     );
 
     const linksAvailableForPreview = sortedList.filter(({ MIMEType }) => isPreviewAvailable(MIMEType));
@@ -88,10 +103,14 @@ const PreviewContainer = ({ match }: RouteComponentProps<{ shareId: string; link
     }, [shareId, linkId]);
 
     const navigateToParent = useCallback(() => {
+        if (referer?.startsWith('/shared-urls')) {
+            navigateToSharedURLs();
+            return;
+        }
         if (meta?.ParentLinkID) {
             navigateToLink(shareId, meta.ParentLinkID, LinkType.FOLDER);
         }
-    }, [meta?.ParentLinkID, shareId]);
+    }, [meta?.ParentLinkID, shareId, referer]);
 
     const onOpen = useCallback(
         ({ LinkID }: LinkMeta) => {
@@ -113,6 +132,24 @@ const PreviewContainer = ({ match }: RouteComponentProps<{ shareId: string; link
         preventLeave(FileSaver.saveAsFile(fileStream, transferMeta)).catch(console.error);
     }, [meta, contents, shareId, linkId]);
 
+    const openDetails = useCallback(() => {
+        if (!meta) {
+            return;
+        }
+
+        const [item] = mapLinksToChildren([meta], (linkId) => cache.get.isLinkLocked(shareId, linkId));
+        createModal(<DetailsModal shareId={shareId} item={item} />);
+    }, [shareId, meta]);
+
+    const openShareOptions = useCallback(() => {
+        if (!meta) {
+            return;
+        }
+
+        const [item] = mapLinksToChildren([meta], (linkId) => cache.get.isLinkLocked(shareId, linkId));
+        createModal(<SharingModal shareId={shareId} item={item} />);
+    }, [shareId, meta]);
+
     const handleNext = () => onOpen?.(linksAvailableForPreview[currentOpenIndex + 1]);
     const handlePrev = () => onOpen?.(linksAvailableForPreview[currentOpenIndex - 1]);
 
@@ -122,8 +159,11 @@ const PreviewContainer = ({ match }: RouteComponentProps<{ shareId: string; link
             contents={contents}
             fileName={meta?.Name}
             mimeType={meta?.MIMEType}
+            sharedStatus={!meta?.Shared ? '' : meta?.UrlsExpired ? 'expired' : 'shared'}
             onClose={navigateToParent}
             onSave={saveFile}
+            onDetail={openDetails}
+            onShare={openShareOptions}
             ref={rootRef}
             navigationControls={
                 meta &&
